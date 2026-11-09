@@ -1,0 +1,5 @@
+{
+  "name": "Polestar Data Portal (EU Data Act)",
+  "render_readme": true,
+  "homeassistant": "2024.12.0"
+}
