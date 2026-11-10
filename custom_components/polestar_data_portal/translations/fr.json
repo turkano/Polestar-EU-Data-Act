@@ -377,13 +377,13 @@
         "name": "Champs non mappés"
       },
       "range_at_full": {
-        "name": "Estimated range at 100%"
+        "name": "Autonomie estimée à 100 %"
       },
       "charge_end_time": {
-        "name": "Charge end time"
+        "name": "Heure de fin de charge"
       },
       "odometer_month": {
-        "name": "Distance this month"
+        "name": "Distance ce mois-ci"
       },
       "last_update": {
         "name": "Dernière mise à jour"
@@ -446,7 +446,7 @@
     },
     "image": {
       "status": {
-        "name": "Vehicle status"
+        "name": "État du véhicule"
       }
     }
   }
