@@ -377,13 +377,13 @@
         "name": "Nicht zugeordnete Felder"
       },
       "range_at_full": {
-        "name": "Estimated range at 100%"
+        "name": "Geschätzte Reichweite bei 100 %"
       },
       "charge_end_time": {
-        "name": "Charge end time"
+        "name": "Ladeende"
       },
       "odometer_month": {
-        "name": "Distance this month"
+        "name": "Strecke diesen Monat"
       },
       "last_update": {
         "name": "Letzte Aktualisierung"
@@ -446,7 +446,7 @@
     },
     "image": {
       "status": {
-        "name": "Vehicle status"
+        "name": "Fahrzeugstatus"
       }
     }
   }
