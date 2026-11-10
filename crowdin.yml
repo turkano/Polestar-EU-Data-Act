@@ -1,0 +1,11 @@
+# Crowdin configuration. Source language is English; translators work in the
+# Crowdin web editor and Crowdin opens pull requests with the translated files.
+project_id_env: CROWDIN_PROJECT_ID
+api_token_env: CROWDIN_PERSONAL_TOKEN
+preserve_hierarchy: true
+
+files:
+  - source: /custom_components/polestar_data_portal/translations/en.json
+    translation: /custom_components/polestar_data_portal/translations/%two_letters_code%.json
+    # Home Assistant strings use {placeholders}; Crowdin keeps them as-is.
+    update_option: update_as_unapproved

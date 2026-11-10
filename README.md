@@ -4,7 +4,7 @@
 
 A Home Assistant custom integration that reads your vehicle data from the **official Polestar Data Portal API** (`data-portal.polestar.com`), the access Polestar provides to vehicle owners under the EU Data Act.
 
-> **Status: beta (v0.2.3).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
+> **Status: beta (v0.2.0).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
 
 - Read-only: no commands, no charging control.
 - Uses the official OAuth2 client-credentials API (no scraping, no Polestar ID password stored).
@@ -66,7 +66,9 @@ Every sensor has a `reported_at` attribute with the timestamp the vehicle/portal
 
 ## Languages
 
-Entity names and the setup/options texts are available in **English, Spanish, French and German**. Home Assistant picks the language automatically: setup and options dialogs use your user language, entity names use the language set in *Settings → System → General*. Any other language falls back to English. To add a language, add a column to `tools/build_translations.py` and run it.
+Entity names and the setup/options texts are available in **English, Spanish, French and German**. Home Assistant picks the language automatically: setup and options dialogs use your user language, entity names use the language set in *Settings → System → General*. Any other language falls back to English.
+
+Translations are managed in **Crowdin** (see `crowdin.yml`). To help translate or add a language, join the Crowdin project (link: *TODO*) and translate in the browser; no Git or JSON knowledge needed. Crowdin opens a pull request with the updated `translations/<lang>.json`.
 
 ## Is every field covered?
 
@@ -104,11 +106,11 @@ logger:
 
 ```bash
 python3 -m unittest discover -s tests -v      # offline tests, no Home Assistant needed
-python3 tools/build_translations.py           # regenerate strings.json and translations/
+python3 tools/build_translations.py           # regenerate strings.json and translations/en.json (source for Crowdin)
 python3 tools/make_icon.py                    # regenerate brand/ icons (needs Pillow)
 ```
 
-Entities are defined in `custom_components/polestar_data_portal/catalog.py`; adding a field is one line there, followed by rebuilding the translations.
+Entities are defined in `custom_components/polestar_data_portal/catalog.py`; adding a field is one line there, followed by `python3 tools/build_translations.py`. Only the English files are generated; other languages are updated through Crowdin (untranslated texts fall back to English meanwhile). Do not hand-edit `translations/<lang>.json` for non-English languages; Crowdin would overwrite the edit.
 
 ## License
 
