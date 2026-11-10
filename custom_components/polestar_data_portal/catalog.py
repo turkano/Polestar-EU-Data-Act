@@ -214,7 +214,7 @@ class Spec:
         if kind == "unlocked":
             return unlocked_state(raw)
         if kind == "count":
-            return len(raw) if isinstance(raw, list) else None
+            return len(raw) if isinstance(raw, (list, dict)) else None
         return None
 
     def raw(self, data: dict[str, Any] | None) -> Any:
@@ -337,6 +337,113 @@ SPECS: tuple[Spec, ...] = (
     _s("charge_locations_count", "charge_locations", "chargeLocations", "Saved charge locations", "Ubicaciones de carga guardadas", "count", icon="mdi:map-marker-multiple", category=DIAG),
 )
 
+
+_EXTRA_SPECS: tuple[Spec, ...] = (
+    # ---- battery: discharge info (bidirectional charging; units not documented)
+    _s("discharge_energy_available", "battery", "dischargeInfo.energyAvailable", "Discharge energy available", "Energía disponible para descarga", category=DIAG, enabled=False),
+    _s("discharge_energy_increase", "battery", "dischargeInfo.energyAvailableIncrease", "Discharge energy increase", "Aumento de energía para descarga", category=DIAG, enabled=False),
+    _s("discharge_power_limit", "battery", "dischargeInfo.powerLimit", "Discharge power limit", "Límite de potencia de descarga", category=DIAG, enabled=False),
+    # ---- health: all light warnings summarised (raw values in attributes) -----
+    _s("light_warnings", "health", "lightWarnings", "Light warnings reported", "Luces reportadas", "count", category=DIAG, enabled=False, icon="mdi:car-light-high"),
+    # ---- parking climatization extras ------------------------------------
+    _s("climate_seat_front_left", "parking_climatization", "requestedFrontLeftSeat", "Requested seat heating front left", "Calefacción asiento delantero izq. solicitada", "text", enabled=False, icon="mdi:car-seat-heater"),
+    _s("climate_seat_front_right", "parking_climatization", "requestedFrontRightSeat", "Requested seat heating front right", "Calefacción asiento delantero der. solicitada", "text", enabled=False, icon="mdi:car-seat-heater"),
+    _s("climate_seat_rear_left", "parking_climatization", "requestedRearLeftSeat", "Requested seat heating rear left", "Calefacción asiento trasero izq. solicitada", "text", enabled=False, icon="mdi:car-seat-heater"),
+    _s("climate_seat_rear_right", "parking_climatization", "requestedRearRightSeat", "Requested seat heating rear right", "Calefacción asiento trasero der. solicitada", "text", enabled=False, icon="mdi:car-seat-heater"),
+    _s("climate_steering_wheel", "parking_climatization", "requestedSteeringWheelHeating", "Requested steering wheel heating", "Calefacción del volante solicitada", "text", enabled=False, icon="mdi:steering"),
+    _s("climate_errors", "parking_climatization", "errors", "Parking climate errors", "Errores de climatización en parado", "count", category=DIAG),
+    _s("climate_warnings", "parking_climatization", "warnings", "Parking climate warnings", "Avisos de climatización en parado", "count", category=DIAG),
+)
+
+# Energy consumption breakdown (battery endpoint), generated to avoid 16 near-identical lines.
+_ENERGY_GROUPS = (
+    # key, API suffix, label per language
+    ("since_charge", "SinceCharge", {"en": "since charge", "es": "desde la carga", "fr": "depuis la charge", "de": "seit der Ladung"}),
+    ("manual", "Manual", {"en": "manual trip", "es": "viaje manual", "fr": "trajet manuel", "de": "manuelle Fahrt"}),
+    ("automatic", "Automatic", {"en": "automatic trip", "es": "viaje automático", "fr": "trajet automatique", "de": "automatische Fahrt"}),
+)
+_ENERGY_CATEGORIES = (
+    ("driving", {"en": "driving", "es": "conducción", "fr": "conduite", "de": "Fahren"}),
+    ("climate", {"en": "climate", "es": "climatización", "fr": "climatisation", "de": "Klima"}),
+    ("battery", {"en": "battery", "es": "batería", "fr": "batterie", "de": "Batterie"}),
+    ("other", {"en": "other", "es": "otros", "fr": "autres", "de": "Sonstiges"}),
+)
+_ENERGY_BASE = {"en": "Energy", "es": "Energía", "fr": "Énergie", "de": "Energie"}
+_SHARE_BASE = {"en": "Energy share", "es": "Reparto de energía", "fr": "Part d'énergie", "de": "Energieanteil"}
+
+# Names of generated specs in every language: {spec key: {lang: name}}
+GENERATED_NAMES: dict[str, dict[str, str]] = {}
+
+
+def _generated_energy_specs() -> tuple[Spec, ...]:
+    out: list[Spec] = []
+    for group, suffix, glabel in _ENERGY_GROUPS:
+        for cat, clabel in _ENERGY_CATEGORIES:
+            key = f"energy_{group}_{cat}"
+            GENERATED_NAMES[key] = {
+                lang: f"{_ENERGY_BASE[lang]} {glabel[lang]}: {clabel[lang]}" for lang in ("en", "es", "fr", "de")
+            }
+            out.append(
+                _s(key, "battery", f"energyConsumptionWh{suffix}.{cat}",
+                   GENERATED_NAMES[key]["en"], GENERATED_NAMES[key]["es"],
+                   device_class="energy", unit="Wh", enabled=(group == "since_charge"), precision=0)
+            )
+    group, suffix, glabel = _ENERGY_GROUPS[0]
+    for cat, clabel in _ENERGY_CATEGORIES:
+        key = f"energy_share_{cat}"
+        GENERATED_NAMES[key] = {
+            lang: f"{_SHARE_BASE[lang]} {glabel[lang]}: {clabel[lang]}" for lang in ("en", "es", "fr", "de")
+        }
+        out.append(
+            _s(key, "battery", f"energyConsumptionPercentageSinceCharge.{cat}",
+               GENERATED_NAMES[key]["en"], GENERATED_NAMES[key]["es"],
+               unit="%", state_class=M, enabled=False, precision=0)
+        )
+    return tuple(out)
+
+
+SPECS = SPECS + _EXTRA_SPECS + _generated_energy_specs()
+
+# --------------------------------------------------------------------------
+# Unmapped-field discovery
+# --------------------------------------------------------------------------
+
+# Bookkeeping keys that never become entities.
+_IGNORED_KEYS = {
+    "vin", "meta", "metaReceivedAt", "metaEventId", "timestamp", "updatedAt",
+    "updatedAtTimestamp", "sourceUpdatedAt", "sourceUpdatedAtTimestamp",
+    "domain", "syncStatus", "utc0",
+    # skipped on purpose: duplicates of mapped metric fields / deprecated
+    "estimatedDistanceToEmptyMiles", "runtimeLeftMinutes",
+}
+
+
+def _leaves(data: Any, prefix: str = "") -> list[str]:
+    """Dotted paths of the deepest fields in a payload (lists count as leaves)."""
+    paths: list[str] = []
+    if not isinstance(data, dict):
+        return paths
+    for key, value in data.items():
+        if key in _IGNORED_KEYS:
+            continue
+        path = f"{prefix}{key}"
+        if isinstance(value, dict) and set(value) - {"seconds", "nanos"}:
+            paths.extend(_leaves(value, f"{path}."))
+        else:
+            paths.append(path)
+    return paths
+
+
+def unmapped_fields(endpoint: str, payload: dict[str, Any] | None) -> list[str]:
+    """Fields present in a payload that no catalog entity reads."""
+    mapped = [p for s in SPECS if s.endpoint == endpoint for p in s.paths]
+    result = []
+    for path in _leaves(payload):
+        if any(path == m or path.startswith(m + ".") for m in mapped):
+            continue
+        result.append(path)
+    return sorted(result)
+
 SPECS_BY_KEY = {s.key: s for s in SPECS}
 assert len(SPECS_BY_KEY) == len(SPECS), "duplicate spec key"
 assert all(s.endpoint in ENDPOINTS for s in SPECS), "unknown endpoint in spec"
@@ -345,6 +452,7 @@ assert all(s.endpoint in ENDPOINTS for s in SPECS), "unknown endpoint in spec"
 ACCOUNT_ENTITIES = {
     "api_calls_today": ("API calls today", "Llamadas a la API hoy"),
     "vehicle_count": ("Vehicles", "Vehículos"),
+    "unmapped_fields": ("Unmapped fields", "Campos sin mapear"),
 }
 # Per-vehicle generic entities
 VEHICLE_LAST_UPDATE = ("last_update", "Last update", "Última actualización")

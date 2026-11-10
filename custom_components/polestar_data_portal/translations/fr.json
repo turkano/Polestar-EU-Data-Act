@@ -1,0 +1,436 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Polestar Data Portal",
+        "description": "Créez des identifiants d'API dans le portail de données Polestar (data-portal.polestar.com → Credential) et saisissez-les ici. L'Account ID figure sur la page API Documentation (x-client-id).",
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret",
+          "account_id": "Account ID (x-client-id)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Saisissez à nouveau vos identifiants d'API",
+        "description": "Le Polestar Data Portal a rejeté les identifiants enregistrés. Saisissez des identifiants valides.",
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret",
+          "account_id": "Account ID (x-client-id)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Le Client ID ou le secret a été rejeté.",
+      "cannot_connect": "Impossible de joindre le Polestar Data Portal. Réessayez plus tard.",
+      "no_vehicle_access": "Ces identifiants ne sont pas autorisés à lister les véhicules. Vérifiez l'Account ID.",
+      "no_vehicles": "Aucun véhicule n'est disponible pour ce compte (seuls les véhicules immatriculés dans un marché UE/EEE éligible sont listés).",
+      "unknown": "Erreur inattendue. Consultez le journal de Home Assistant."
+    },
+    "abort": {
+      "already_configured": "Ces identifiants sont déjà configurés.",
+      "reauth_successful": "Identifiants mis à jour."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options d'interrogation",
+        "description": "Le portail autorise 10 000 appels d'API par jour. Chaque type de données activé coûte un appel par véhicule et par interrogation. Vous avez {vehicles} véhicule(s) ; l'intégration maintient l'estimation sous {limit} appels par jour.",
+        "data": {
+          "scan_interval": "Intervalle d'interrogation (minutes)",
+          "endpoints": "Données à récupérer"
+        }
+      }
+    },
+    "error": {
+      "no_endpoints": "Sélectionnez au moins un type de données.",
+      "too_many_calls": "Cela dépasserait la limite quotidienne de l'API. Augmentez l'intervalle ou désactivez certaines données."
+    }
+  },
+  "selector": {
+    "endpoints": {
+      "options": {
+        "availability": "Disponibilité",
+        "battery": "Batterie et charge",
+        "exterior": "Portes, vitres et verrouillage",
+        "health": "État (entretien, pneus, alertes)",
+        "location": "Position",
+        "odometer": "Kilométrage et trajets",
+        "target_soc": "Objectif de charge",
+        "parking_climatization": "Climatisation à l'arrêt",
+        "pre_cleaning": "Prépurification de l'habitacle",
+        "amp_limit": "Limite de courant de charge",
+        "charge_now": "Charge immédiate",
+        "global_charge_timer": "Minuterie de charge globale",
+        "is_at_charge_location": "Sur un lieu de charge",
+        "charge_locations": "Lieux de charge"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "availability_status": {
+        "name": "Disponibilité"
+      },
+      "usage_mode": {
+        "name": "Mode d'utilisation"
+      },
+      "unavailable_reason": {
+        "name": "Motif d'indisponibilité"
+      },
+      "battery_level": {
+        "name": "Batterie"
+      },
+      "range": {
+        "name": "Autonomie"
+      },
+      "charging_status": {
+        "name": "État de charge"
+      },
+      "charger_connection_status": {
+        "name": "Connexion du chargeur"
+      },
+      "charger_power_status": {
+        "name": "État d'alimentation du chargeur"
+      },
+      "charging_type": {
+        "name": "Type de charge"
+      },
+      "charging_power": {
+        "name": "Puissance de charge"
+      },
+      "charging_current": {
+        "name": "Courant de charge"
+      },
+      "charging_voltage": {
+        "name": "Tension de charge"
+      },
+      "time_to_full": {
+        "name": "Temps avant charge complète"
+      },
+      "time_to_target_distance": {
+        "name": "Temps avant l'autonomie cible"
+      },
+      "time_to_minimum_soc": {
+        "name": "Temps avant la charge minimale"
+      },
+      "consumption_average": {
+        "name": "Consommation moyenne"
+      },
+      "consumption_since_charge": {
+        "name": "Consommation depuis la dernière charge"
+      },
+      "consumption_automatic": {
+        "name": "Consommation (trajet automatique)"
+      },
+      "total_energy_consumption": {
+        "name": "Consommation d'énergie totale"
+      },
+      "preconditioning_status": {
+        "name": "Préconditionnement"
+      },
+      "alarm": {
+        "name": "Alarme"
+      },
+      "days_to_service": {
+        "name": "Jours avant l'entretien"
+      },
+      "distance_to_service": {
+        "name": "Distance avant l'entretien"
+      },
+      "engine_hours_to_service": {
+        "name": "Heures moteur avant l'entretien"
+      },
+      "service_warning": {
+        "name": "Alerte d'entretien"
+      },
+      "brake_fluid_warning": {
+        "name": "Alerte liquide de frein"
+      },
+      "coolant_warning": {
+        "name": "Alerte liquide de refroidissement"
+      },
+      "oil_warning": {
+        "name": "Alerte niveau d'huile"
+      },
+      "washer_fluid_warning": {
+        "name": "Alerte lave-glace"
+      },
+      "low_voltage_battery_warning": {
+        "name": "Alerte batterie 12 V"
+      },
+      "tyre_pressure_front_left": {
+        "name": "Pression pneu avant gauche"
+      },
+      "tyre_pressure_front_right": {
+        "name": "Pression pneu avant droit"
+      },
+      "tyre_pressure_rear_left": {
+        "name": "Pression pneu arrière gauche"
+      },
+      "tyre_pressure_rear_right": {
+        "name": "Pression pneu arrière droit"
+      },
+      "tyre_reference_front": {
+        "name": "Pression recommandée essieu avant"
+      },
+      "tyre_reference_rear": {
+        "name": "Pression recommandée essieu arrière"
+      },
+      "tyre_warning_front_left": {
+        "name": "Alerte pneu avant gauche"
+      },
+      "tyre_warning_front_right": {
+        "name": "Alerte pneu avant droit"
+      },
+      "tyre_warning_rear_left": {
+        "name": "Alerte pneu arrière gauche"
+      },
+      "tyre_warning_rear_right": {
+        "name": "Alerte pneu arrière droit"
+      },
+      "speed": {
+        "name": "Vitesse"
+      },
+      "altitude": {
+        "name": "Altitude"
+      },
+      "heading": {
+        "name": "Cap"
+      },
+      "odometer": {
+        "name": "Kilométrage"
+      },
+      "trip_manual": {
+        "name": "Trajet (manuel)"
+      },
+      "trip_automatic": {
+        "name": "Trajet (automatique)"
+      },
+      "trip_since_charge": {
+        "name": "Distance depuis la dernière charge"
+      },
+      "average_speed_manual": {
+        "name": "Vitesse moyenne (trajet manuel)"
+      },
+      "average_speed_automatic": {
+        "name": "Vitesse moyenne (trajet automatique)"
+      },
+      "average_speed_since_charge": {
+        "name": "Vitesse moyenne depuis la charge"
+      },
+      "target_soc": {
+        "name": "Objectif de charge"
+      },
+      "target_soc_type": {
+        "name": "Type d'objectif de charge"
+      },
+      "climate_running_status": {
+        "name": "État de la climatisation à l'arrêt"
+      },
+      "climate_main_running_status": {
+        "name": "État de la climatisation principale"
+      },
+      "climate_ventilation": {
+        "name": "Ventilation"
+      },
+      "climate_current_temperature": {
+        "name": "Température de l'habitacle"
+      },
+      "climate_requested_temperature": {
+        "name": "Température demandée"
+      },
+      "climate_started_at": {
+        "name": "Début de la climatisation"
+      },
+      "climate_ending_at": {
+        "name": "Fin de la climatisation"
+      },
+      "climate_start_reason": {
+        "name": "Motif de démarrage"
+      },
+      "pre_cleaning_status": {
+        "name": "État de la prépurification"
+      },
+      "air_quality_index": {
+        "name": "Indice de qualité de l'air"
+      },
+      "particulate_matter_25": {
+        "name": "Particules PM2,5"
+      },
+      "pre_cleaning_last_cycle": {
+        "name": "Dernier cycle de prépurification"
+      },
+      "pre_cleaning_error": {
+        "name": "Erreur de prépurification"
+      },
+      "amp_limit": {
+        "name": "Limite de courant de charge"
+      },
+      "global_timer_start": {
+        "name": "Début de la minuterie globale"
+      },
+      "global_timer_stop": {
+        "name": "Fin de la minuterie globale"
+      },
+      "charge_location_id": {
+        "name": "Lieu de charge actuel"
+      },
+      "charge_location_arrived": {
+        "name": "Arrivée au lieu de charge"
+      },
+      "charge_locations_count": {
+        "name": "Lieux de charge enregistrés"
+      },
+      "discharge_energy_available": {
+        "name": "Énergie disponible pour la décharge"
+      },
+      "discharge_energy_increase": {
+        "name": "Augmentation de l'énergie de décharge"
+      },
+      "discharge_power_limit": {
+        "name": "Limite de puissance de décharge"
+      },
+      "light_warnings": {
+        "name": "Feux signalés"
+      },
+      "climate_seat_front_left": {
+        "name": "Siège chauffant avant gauche demandé"
+      },
+      "climate_seat_front_right": {
+        "name": "Siège chauffant avant droit demandé"
+      },
+      "climate_seat_rear_left": {
+        "name": "Siège chauffant arrière gauche demandé"
+      },
+      "climate_seat_rear_right": {
+        "name": "Siège chauffant arrière droit demandé"
+      },
+      "climate_steering_wheel": {
+        "name": "Volant chauffant demandé"
+      },
+      "climate_errors": {
+        "name": "Erreurs de climatisation à l'arrêt"
+      },
+      "climate_warnings": {
+        "name": "Alertes de climatisation à l'arrêt"
+      },
+      "energy_since_charge_driving": {
+        "name": "Énergie depuis la charge: conduite"
+      },
+      "energy_since_charge_climate": {
+        "name": "Énergie depuis la charge: climatisation"
+      },
+      "energy_since_charge_battery": {
+        "name": "Énergie depuis la charge: batterie"
+      },
+      "energy_since_charge_other": {
+        "name": "Énergie depuis la charge: autres"
+      },
+      "energy_manual_driving": {
+        "name": "Énergie trajet manuel: conduite"
+      },
+      "energy_manual_climate": {
+        "name": "Énergie trajet manuel: climatisation"
+      },
+      "energy_manual_battery": {
+        "name": "Énergie trajet manuel: batterie"
+      },
+      "energy_manual_other": {
+        "name": "Énergie trajet manuel: autres"
+      },
+      "energy_automatic_driving": {
+        "name": "Énergie trajet automatique: conduite"
+      },
+      "energy_automatic_climate": {
+        "name": "Énergie trajet automatique: climatisation"
+      },
+      "energy_automatic_battery": {
+        "name": "Énergie trajet automatique: batterie"
+      },
+      "energy_automatic_other": {
+        "name": "Énergie trajet automatique: autres"
+      },
+      "energy_share_driving": {
+        "name": "Part d'énergie depuis la charge: conduite"
+      },
+      "energy_share_climate": {
+        "name": "Part d'énergie depuis la charge: climatisation"
+      },
+      "energy_share_battery": {
+        "name": "Part d'énergie depuis la charge: batterie"
+      },
+      "energy_share_other": {
+        "name": "Part d'énergie depuis la charge: autres"
+      },
+      "api_calls_today": {
+        "name": "Appels API aujourd'hui"
+      },
+      "vehicle_count": {
+        "name": "Véhicules"
+      },
+      "unmapped_fields": {
+        "name": "Champs non mappés"
+      },
+      "last_update": {
+        "name": "Dernière mise à jour"
+      }
+    },
+    "binary_sensor": {
+      "central_lock": {
+        "name": "Verrouillage centralisé"
+      },
+      "tailgate_lock": {
+        "name": "Verrouillage du hayon"
+      },
+      "front_left_door": {
+        "name": "Porte avant gauche"
+      },
+      "front_right_door": {
+        "name": "Porte avant droite"
+      },
+      "rear_left_door": {
+        "name": "Porte arrière gauche"
+      },
+      "rear_right_door": {
+        "name": "Porte arrière droite"
+      },
+      "front_left_window": {
+        "name": "Vitre avant gauche"
+      },
+      "front_right_window": {
+        "name": "Vitre avant droite"
+      },
+      "rear_left_window": {
+        "name": "Vitre arrière gauche"
+      },
+      "rear_right_window": {
+        "name": "Vitre arrière droite"
+      },
+      "hood": {
+        "name": "Capot"
+      },
+      "tailgate": {
+        "name": "Hayon"
+      },
+      "tank_lid": {
+        "name": "Trappe de charge / réservoir"
+      },
+      "sunroof": {
+        "name": "Toit ouvrant"
+      },
+      "charge_now": {
+        "name": "Charge immédiate"
+      },
+      "global_timer_active": {
+        "name": "Minuterie globale active"
+      }
+    },
+    "device_tracker": {
+      "location": {
+        "name": "Position"
+      }
+    }
+  }
+}

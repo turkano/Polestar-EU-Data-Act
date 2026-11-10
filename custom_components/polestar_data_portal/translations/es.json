@@ -283,11 +283,95 @@
       "charge_locations_count": {
         "name": "Ubicaciones de carga guardadas"
       },
+      "discharge_energy_available": {
+        "name": "Energía disponible para descarga"
+      },
+      "discharge_energy_increase": {
+        "name": "Aumento de energía para descarga"
+      },
+      "discharge_power_limit": {
+        "name": "Límite de potencia de descarga"
+      },
+      "light_warnings": {
+        "name": "Luces reportadas"
+      },
+      "climate_seat_front_left": {
+        "name": "Calefacción asiento delantero izq. solicitada"
+      },
+      "climate_seat_front_right": {
+        "name": "Calefacción asiento delantero der. solicitada"
+      },
+      "climate_seat_rear_left": {
+        "name": "Calefacción asiento trasero izq. solicitada"
+      },
+      "climate_seat_rear_right": {
+        "name": "Calefacción asiento trasero der. solicitada"
+      },
+      "climate_steering_wheel": {
+        "name": "Calefacción del volante solicitada"
+      },
+      "climate_errors": {
+        "name": "Errores de climatización en parado"
+      },
+      "climate_warnings": {
+        "name": "Avisos de climatización en parado"
+      },
+      "energy_since_charge_driving": {
+        "name": "Energía desde la carga: conducción"
+      },
+      "energy_since_charge_climate": {
+        "name": "Energía desde la carga: climatización"
+      },
+      "energy_since_charge_battery": {
+        "name": "Energía desde la carga: batería"
+      },
+      "energy_since_charge_other": {
+        "name": "Energía desde la carga: otros"
+      },
+      "energy_manual_driving": {
+        "name": "Energía viaje manual: conducción"
+      },
+      "energy_manual_climate": {
+        "name": "Energía viaje manual: climatización"
+      },
+      "energy_manual_battery": {
+        "name": "Energía viaje manual: batería"
+      },
+      "energy_manual_other": {
+        "name": "Energía viaje manual: otros"
+      },
+      "energy_automatic_driving": {
+        "name": "Energía viaje automático: conducción"
+      },
+      "energy_automatic_climate": {
+        "name": "Energía viaje automático: climatización"
+      },
+      "energy_automatic_battery": {
+        "name": "Energía viaje automático: batería"
+      },
+      "energy_automatic_other": {
+        "name": "Energía viaje automático: otros"
+      },
+      "energy_share_driving": {
+        "name": "Reparto de energía desde la carga: conducción"
+      },
+      "energy_share_climate": {
+        "name": "Reparto de energía desde la carga: climatización"
+      },
+      "energy_share_battery": {
+        "name": "Reparto de energía desde la carga: batería"
+      },
+      "energy_share_other": {
+        "name": "Reparto de energía desde la carga: otros"
+      },
       "api_calls_today": {
         "name": "Llamadas a la API hoy"
       },
       "vehicle_count": {
         "name": "Vehículos"
+      },
+      "unmapped_fields": {
+        "name": "Campos sin mapear"
       },
       "last_update": {
         "name": "Última actualización"

@@ -161,6 +161,124 @@ class CatalogTests(unittest.TestCase):
         )
 
 
+class ExtendedCatalogTests(unittest.TestCase):
+    def spec(self, key):
+        return catalog.SPECS_BY_KEY[key]
+
+    def test_energy_breakdown(self):
+        data = {
+            "energyConsumptionWhSinceCharge": {"driving": 1200, "climate": 150, "battery": 20, "other": 5},
+            "energyConsumptionPercentageSinceCharge": {"driving": 87.5},
+        }
+        self.assertEqual(self.spec("energy_since_charge_driving").extract(data), 1200.0)
+        self.assertEqual(self.spec("energy_since_charge_climate").extract(data), 150.0)
+        self.assertEqual(self.spec("energy_share_driving").extract(data), 87.5)
+        self.assertIsNone(self.spec("energy_manual_driving").extract(data))
+        self.assertTrue(self.spec("energy_since_charge_driving").enabled)
+        self.assertFalse(self.spec("energy_manual_driving").enabled)
+        self.assertEqual(len([k for k in catalog.GENERATED_NAMES]), 16)
+
+    def test_count_accepts_dicts_and_lists(self):
+        self.assertEqual(self.spec("light_warnings").extract({"lightWarnings": {"lowBeamLeft": "OK", "fogLightRear": "OK"}}), 2)
+        self.assertEqual(self.spec("climate_errors").extract({"errors": ["E1"]}), 1)
+        self.assertEqual(self.spec("climate_errors").extract({"errors": []}), 0)
+        self.assertIsNone(self.spec("climate_errors").extract({"errors": "x"}))
+
+    def test_discharge_and_seats(self):
+        self.assertEqual(self.spec("discharge_power_limit").extract({"dischargeInfo": {"powerLimit": 3700}}), 3700.0)
+        self.assertEqual(self.spec("climate_seat_front_left").extract({"requestedFrontLeftSeat": "LEVEL_2"}), "LEVEL_2")
+
+    def test_unmapped_fields(self):
+        payload = {
+            "vin": "V",
+            "meta": {"x": 1},
+            "metaReceivedAt": "2026-01-01T00:00:00Z",
+            "timestamp": {"seconds": "1", "nanos": 0},
+            "batteryChargeLevelPercentage": 50,
+            "estimatedDistanceToEmptyMiles": 100,
+            "brandNewField": 7,
+            "nested": {"deep": {"leaf": 1}},
+            "dischargeInfo": {"powerLimit": 1, "surprise": 2},
+            "startedAt": {"seconds": "1", "nanos": 0},
+        }
+        self.assertEqual(
+            catalog.unmapped_fields("battery", payload),
+            ["brandNewField", "dischargeInfo.surprise", "nested.deep.leaf", "startedAt"],
+        )
+        self.assertEqual(catalog.unmapped_fields("battery", None), [])
+        self.assertEqual(catalog.unmapped_fields("battery", {}), [])
+
+    def test_known_optional_fields_in_other_endpoints_are_mapped(self):
+        self.assertEqual(
+            catalog.unmapped_fields("parking_climatization", {"runningStatus": "ON", "errors": [], "requestedFrontLeftSeat": "OFF"}),
+            [],
+        )
+
+
+class TranslationTests(unittest.TestCase):
+    LANGS = ("en", "es", "fr", "de")
+
+    @classmethod
+    def setUpClass(cls):
+        import json
+
+        cls.data = {
+            lang: json.loads((COMP / "translations" / f"{lang}.json").read_text(encoding="utf-8"))
+            for lang in cls.LANGS
+        }
+
+    def test_every_entity_has_a_name_in_every_language(self):
+        for lang in self.LANGS:
+            entity = self.data[lang]["entity"]
+            for s in catalog.SPECS:
+                name = entity[s.platform][s.key]["name"]
+                self.assertTrue(name.strip(), f"{lang}:{s.key}")
+            for key in catalog.ACCOUNT_ENTITIES:
+                self.assertTrue(entity["sensor"][key]["name"].strip(), f"{lang}:{key}")
+            self.assertTrue(entity["sensor"]["last_update"]["name"])
+            self.assertTrue(entity["device_tracker"]["location"]["name"])
+
+    def test_same_keys_everywhere(self):
+        def keys(node, prefix=""):
+            out = set()
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    out |= {f"{prefix}{k}"} | keys(v, f"{prefix}{k}.")
+            return out
+
+        reference = keys(self.data["en"])
+        for lang in self.LANGS:
+            self.assertEqual(keys(self.data[lang]), reference, lang)
+
+    def test_placeholders_preserved(self):
+        for lang in self.LANGS:
+            desc = self.data[lang]["options"]["step"]["init"]["description"]
+            self.assertIn("{vehicles}", desc, lang)
+            self.assertIn("{limit}", desc, lang)
+
+    def test_languages_really_differ(self):
+        for key in ("battery_level", "range", "odometer"):
+            names = {self.data[l]["entity"]["sensor"][key]["name"] for l in self.LANGS}
+            self.assertGreater(len(names), 2, key)
+
+    def test_strings_json_matches_english(self):
+        import json
+
+        strings = json.loads((COMP / "strings.json").read_text(encoding="utf-8"))
+        self.assertEqual(strings, self.data["en"])
+
+
+class BrandTests(unittest.TestCase):
+    def test_icon_files_exist_with_expected_sizes(self):
+        brand = COMP / "brand"
+        sizes = {"icon.png": 256, "icon@2x.png": 512, "logo.png": 256, "logo@2x.png": 512}
+        for name, size in sizes.items():
+            data = (brand / name).read_bytes()
+            self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n", name)
+            width, height = int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+            self.assertEqual((width, height), (size, size), name)
+
+
 class FakeResp:
     def __init__(self, status, body):
         self.status = status

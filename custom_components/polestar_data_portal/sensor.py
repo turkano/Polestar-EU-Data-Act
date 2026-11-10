@@ -39,6 +39,7 @@ async def async_setup_entry(
         [
             PolestarAccountSensor(coordinator, entry, "api_calls_today"),
             PolestarAccountSensor(coordinator, entry, "vehicle_count"),
+            PolestarAccountSensor(coordinator, entry, "unmapped_fields"),
         ]
     )
 
@@ -82,6 +83,18 @@ class PolestarSensor(PolestarSpecEntity, SensorEntity):
     def native_value(self) -> Any:
         return self._spec.extract(self._payload(self._spec.endpoint))
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        attrs = dict(super().extra_state_attributes or {})
+        if self._spec.kind == "count":
+            raw = self._spec.raw(self._payload(self._spec.endpoint))
+            # Only simple values: never expose lists of objects (e.g. coordinates).
+            if isinstance(raw, dict):
+                attrs["values"] = {k: v for k, v in raw.items() if isinstance(v, (str, int, float, bool))}
+            elif isinstance(raw, list) and all(isinstance(i, str) for i in raw):
+                attrs["items"] = raw
+        return attrs or None
+
 
 class PolestarLastUpdateSensor(PolestarVehicleEntity, SensorEntity):
     """Newest data timestamp reported by any endpoint of this vehicle."""
@@ -118,13 +131,24 @@ class PolestarAccountSensor(CoordinatorEntity[PolestarCoordinator], SensorEntity
         if key == "api_calls_today":
             self._attr_state_class = SensorStateClass.MEASUREMENT
             self._attr_icon = "mdi:counter"
-            self._attr_extra_state_attributes = {"daily_limit": 10000}
+        elif key == "unmapped_fields":
+            self._attr_icon = "mdi:magnify-scan"
 
     @property
     def native_value(self) -> int:
         if self._key == "api_calls_today":
             return self.coordinator.client.calls_today
+        if self._key == "unmapped_fields":
+            return len(self.coordinator.unmapped())
         return len(self.coordinator.vins)
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self._key == "api_calls_today":
+            return {"daily_limit": 10000}
+        if self._key == "unmapped_fields":
+            return {"fields": self.coordinator.unmapped()}
+        return None
 
-assert set(ACCOUNT_ENTITIES) == {"api_calls_today", "vehicle_count"}
+
+assert set(ACCOUNT_ENTITIES) == {"api_calls_today", "vehicle_count", "unmapped_fields"}

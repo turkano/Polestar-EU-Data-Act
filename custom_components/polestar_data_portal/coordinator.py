@@ -21,7 +21,7 @@ from .api import (
     PolestarNotAvailableError,
     PolestarRateLimitError,
 )
-from .catalog import DEFAULT_ENDPOINTS, DEFAULT_SCAN_INTERVAL_MIN, ENDPOINTS
+from .catalog import DEFAULT_ENDPOINTS, DEFAULT_SCAN_INTERVAL_MIN, ENDPOINTS, unmapped_fields
 from .const import (
     CONF_ENDPOINTS,
     CONF_SCAN_INTERVAL,
@@ -61,6 +61,14 @@ class PolestarCoordinator(DataUpdateCoordinator[PolestarData]):
         # (vin, endpoint) -> monotonic time until which the endpoint is skipped
         self._skip_until: dict[tuple[str, str], float] = {}
         self._logged_skips: set[tuple[str, str]] = set()
+
+    def unmapped(self) -> list[str]:
+        """Fields the vehicles report that no entity reads yet ("endpoint.path")."""
+        found: set[str] = set()
+        for endpoints in (self.data or {}).values():
+            for endpoint, payload in endpoints.items():
+                found.update(f"{endpoint}.{path}" for path in unmapped_fields(endpoint, payload))
+        return sorted(found)
 
     async def _async_refresh_vehicles(self) -> None:
         now = time.monotonic()

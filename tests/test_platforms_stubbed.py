@@ -137,6 +137,7 @@ class PlatformSmokeTests(unittest.TestCase):
             endpoints=["battery", "exterior", "location"],
             client=types.SimpleNamespace(calls_today=7),
         )
+        coord.unmapped = lambda: ["battery.someNewField", "health.other.field"]
         coord.async_add_listener = lambda cb: (lambda: None)
         return coord
 
@@ -162,6 +163,11 @@ class PlatformSmokeTests(unittest.TestCase):
         self.assertEqual(by_uid["YSM123456_battery_level"].extra_state_attributes["reported_at"][:4], "2025")
         self.assertEqual(by_uid["entry1_api_calls_today"].native_value, 7)
         self.assertEqual(by_uid["entry1_vehicle_count"].native_value, 1)
+        self.assertEqual(by_uid["entry1_unmapped_fields"].native_value, 2)
+        self.assertEqual(
+            by_uid["entry1_unmapped_fields"].extra_state_attributes["fields"],
+            ["battery.someNewField", "health.other.field"],
+        )
 
     def test_binary_sensors_keep_unknown_raw_values(self):
         _, added = self._setup_platform("binary_sensor")

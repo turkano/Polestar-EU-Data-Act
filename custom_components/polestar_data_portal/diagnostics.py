@@ -45,4 +45,5 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
             for vin, eps in data.items()
         },
         "catalog_fields": len(SPECS),
+        "unmapped_fields": coordinator.unmapped(),
     }
