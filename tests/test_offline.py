@@ -208,6 +208,19 @@ class ExtendedCatalogTests(unittest.TestCase):
         self.assertEqual(catalog.unmapped_fields("battery", None), [])
         self.assertEqual(catalog.unmapped_fields("battery", {}), [])
 
+    def test_tracker_coordinates_and_ids_are_not_reported(self):
+        location = {"coordinate": {"latitude": 1.0, "longitude": 2.0}, "speed": 0, "id": "x"}
+        self.assertEqual(catalog.unmapped_fields("location", location), [])
+        target = {
+            "id": "a",
+            "targetSoc": {"batteryChargeTargetLevel": 80, "chargeTargetLevelSettingType": "DAILY", "id": "b", "source": "APP"},
+        }
+        self.assertEqual(catalog.unmapped_fields("target_soc", target), [])
+        self.assertEqual(self.spec_for("target_soc_source").extract(target), "APP")
+
+    def spec_for(self, key):
+        return catalog.SPECS_BY_KEY[key]
+
     def test_known_optional_fields_in_other_endpoints_are_mapped(self):
         self.assertEqual(
             catalog.unmapped_fields("parking_climatization", {"runningStatus": "ON", "errors": [], "requestedFrontLeftSeat": "OFF"}),

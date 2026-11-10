@@ -226,6 +226,9 @@
       "target_soc_type": {
         "name": "Charge target type"
       },
+      "target_soc_source": {
+        "name": "Charge target source"
+      },
       "climate_running_status": {
         "name": "Parking climate status"
       },

@@ -311,6 +311,7 @@ SPECS: tuple[Spec, ...] = (
     # ---- charge target ---------------------------------------------------
     _s("target_soc", "target_soc", "targetSoc.batteryChargeTargetLevel", "Charge target", "Objetivo de carga", unit="%", state_class=M, icon="mdi:battery-charging-high"),
     _s("target_soc_type", "target_soc", "targetSoc.chargeTargetLevelSettingType", "Charge target type", "Tipo de objetivo de carga", "text", category=DIAG),
+    _s("target_soc_source", "target_soc", "targetSoc.source", "Charge target source", "Origen del objetivo de carga", "text", category=DIAG, enabled=False),
     # ---- parking climatization ------------------------------------------
     _s("climate_running_status", "parking_climatization", "runningStatus", "Parking climate status", "Estado climatización en parado", "text", icon="mdi:air-conditioner"),
     _s("climate_main_running_status", "parking_climatization", "mainClimateRunningStatus", "Main climate status", "Estado climatización principal", "text"),
@@ -412,7 +413,7 @@ SPECS = SPECS + _EXTRA_SPECS + _generated_energy_specs()
 _IGNORED_KEYS = {
     "vin", "meta", "metaReceivedAt", "metaEventId", "timestamp", "updatedAt",
     "updatedAtTimestamp", "sourceUpdatedAt", "sourceUpdatedAtTimestamp",
-    "domain", "syncStatus", "utc0",
+    "domain", "syncStatus", "utc0", "id",
     # skipped on purpose: duplicates of mapped metric fields / deprecated
     "estimatedDistanceToEmptyMiles", "runtimeLeftMinutes",
 }
@@ -434,9 +435,14 @@ def _leaves(data: Any, prefix: str = "") -> list[str]:
     return paths
 
 
+# Fields read by platforms that are not catalog specs (the GPS device tracker).
+_TRACKER_PATHS = {"location": ("coordinate.latitude", "coordinate.longitude")}
+
+
 def unmapped_fields(endpoint: str, payload: dict[str, Any] | None) -> list[str]:
-    """Fields present in a payload that no catalog entity reads."""
+    """Fields present in a payload that no entity reads."""
     mapped = [p for s in SPECS if s.endpoint == endpoint for p in s.paths]
+    mapped.extend(_TRACKER_PATHS.get(endpoint, ()))
     result = []
     for path in _leaves(payload):
         if any(path == m or path.startswith(m + ".") for m in mapped):

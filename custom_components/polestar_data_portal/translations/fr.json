@@ -226,6 +226,9 @@
       "target_soc_type": {
         "name": "Type d'objectif de charge"
       },
+      "target_soc_source": {
+        "name": "Source de l'objectif de charge"
+      },
       "climate_running_status": {
         "name": "État de la climatisation à l'arrêt"
       },

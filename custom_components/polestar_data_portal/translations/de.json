@@ -226,6 +226,9 @@
       "target_soc_type": {
         "name": "Art des Ladeziels"
       },
+      "target_soc_source": {
+        "name": "Quelle des Ladeziels"
+      },
       "climate_running_status": {
         "name": "Status der Standklimatisierung"
       },

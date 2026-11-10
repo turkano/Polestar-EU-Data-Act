@@ -1,12 +1,12 @@
 {
   "domain": "polestar_data_portal",
-  "name": "Polestar EU Data Act",
+  "name": "Polestar Data Portal (EU Data Act)",
   "codeowners": [],
   "config_flow": true,
-  "documentation": "https://github.com/CHANGE_ME/Polestar-EU-Data-Act",
+  "documentation": "https://github.com/CHANGE_ME/HA_Polestar-Data-Portal",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/CHANGE_ME/Polestar-EU-Data-Act/issues",
+  "issue_tracker": "https://github.com/CHANGE_ME/HA_Polestar-Data-Portal/issues",
   "requirements": [],
-  "version": "0.2.2"
+  "version": "0.2.1"
 }

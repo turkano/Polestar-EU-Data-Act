@@ -211,6 +211,7 @@ SPEC_NAMES = {  # key: (fr, de)
     "average_speed_since_charge": ("Vitesse moyenne depuis la charge", "Durchschnittsgeschwindigkeit seit der Ladung"),
     "target_soc": ("Objectif de charge", "Ladeziel"),
     "target_soc_type": ("Type d'objectif de charge", "Art des Ladeziels"),
+    "target_soc_source": ("Source de l'objectif de charge", "Quelle des Ladeziels"),
     "climate_running_status": ("État de la climatisation à l'arrêt", "Status der Standklimatisierung"),
     "climate_main_running_status": ("État de la climatisation principale", "Status der Hauptklimatisierung"),
     "climate_ventilation": ("Ventilation", "Belüftung"),
