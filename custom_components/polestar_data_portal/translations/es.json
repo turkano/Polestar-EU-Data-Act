@@ -376,6 +376,15 @@
       "unmapped_fields": {
         "name": "Campos sin mapear"
       },
+      "range_at_full": {
+        "name": "Estimated range at 100%"
+      },
+      "charge_end_time": {
+        "name": "Charge end time"
+      },
+      "odometer_month": {
+        "name": "Distance this month"
+      },
       "last_update": {
         "name": "Última actualización"
       }
@@ -433,6 +442,11 @@
     "device_tracker": {
       "location": {
         "name": "Ubicación"
+      }
+    },
+    "image": {
+      "status": {
+        "name": "Vehicle status"
       }
     }
   }
