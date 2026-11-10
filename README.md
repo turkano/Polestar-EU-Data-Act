@@ -4,7 +4,7 @@
 
 A Home Assistant custom integration that reads your vehicle data from the **official Polestar Data Portal API** (`data-portal.polestar.com`), the access Polestar provides to vehicle owners under the EU Data Act.
 
-> **Status: beta (v0.3.0).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
+> **Status: beta (v0.3.1).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
 
 - Read-only: no commands, no charging control.
 - Uses the official OAuth2 client-credentials API (no scraping, no Polestar ID password stored).
@@ -104,6 +104,7 @@ Open an issue with those names and (if the value is a status string) the raw val
 
 ## Known limitations
 
+- **Warning sensors** (service, brake fluid, coolant, oil, washer fluid, 12 V battery, tyres) show only the meaningful part of the API value, e.g. `LOW_VOLTAGE_BATTERY_WARNING_NO_WARNING` becomes *No warning*. The original text is in the `raw_state` attribute.
 - **Enum values are not documented.** For status fields (charging status, warnings, door states …) the API documents plain strings without listing possible values. Text sensors show the raw value. Door/window/lock binary sensors interpret values containing *open/closed/locked/unlocked*; the raw value is always in the `raw_state` attribute, and the state stays *unknown* if a value isn't recognised. If you see unknown values, open an issue with the raw value.
 - Individual light warnings are exposed only as a summary sensor (count + raw values in attributes, disabled by default) until the possible values are known. Charge timers, departure times and per-location charging profiles are not mapped yet.
 - Units of the discharge-info fields are not documented, so they are shown without a unit.

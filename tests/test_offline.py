@@ -228,6 +228,22 @@ class ExtendedCatalogTests(unittest.TestCase):
         )
 
 
+class WarningTextTests(unittest.TestCase):
+    def test_humanize(self):
+        self.assertEqual(catalog.humanize_warning("LOW_VOLTAGE_BATTERY_WARNING_NO_WARNING"), "No warning")
+        self.assertEqual(catalog.humanize_warning("BRAKE_FLUID_LEVEL_WARNING_TOO_LOW"), "Too low")
+        self.assertEqual(catalog.humanize_warning("NO_WARNING"), "No warning")
+        self.assertEqual(catalog.humanize_warning("UNSPECIFIED"), "Unspecified")
+        self.assertIsNone(catalog.humanize_warning("  "))
+
+    def test_warning_specs_use_it(self):
+        spec = catalog.SPECS_BY_KEY["brake_fluid_warning"]
+        payload = {"brakeFluidLevelWarning": "BRAKE_FLUID_LEVEL_WARNING_NO_WARNING"}
+        self.assertEqual(spec.extract(payload), "No warning")
+        self.assertEqual(spec.raw(payload), "BRAKE_FLUID_LEVEL_WARNING_NO_WARNING")
+        self.assertEqual(catalog.unmapped_fields("health", payload), [])
+
+
 class TranslationTests(unittest.TestCase):
     """English is generated from catalog.py; other languages come from Crowdin.
 

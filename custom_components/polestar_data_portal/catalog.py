@@ -163,6 +163,22 @@ def unlocked_state(value: Any) -> bool | None:
 # --------------------------------------------------------------------------
 
 
+def humanize_warning(value: Any) -> str | None:
+    """Short readable form of a warning enum.
+
+    The API repeats the field name inside the value, e.g.
+    ``LOW_VOLTAGE_BATTERY_WARNING_NO_WARNING``; only the part after the last
+    ``_WARNING_`` carries information, so that becomes ``No warning``.
+    """
+    text = str(value).strip()
+    if not text:
+        return None
+    if "_WARNING_" in text:
+        text = text.rsplit("_WARNING_", 1)[1]
+    text = text.replace("_", " ").strip().lower()
+    return text[:1].upper() + text[1:] if text else None
+
+
 @dataclass(frozen=True)
 class Spec:
     """Describes one entity derived from one field of one endpoint."""
@@ -171,7 +187,7 @@ class Spec:
     endpoint: str
     platform: str  # "sensor" | "binary_sensor"
     paths: tuple[str, ...]  # first path with a value wins
-    kind: str  # num | text | ts | m_to_km | hhmm | bool | opening | unlocked | count
+    kind: str  # num | text | warning | ts | m_to_km | hhmm | bool | opening | unlocked | count
     name_en: str
     name_es: str
     device_class: str | None = None
@@ -203,6 +219,8 @@ class Spec:
             if isinstance(raw, (dict, list)):
                 return None
             return str(raw)
+        if kind == "warning":
+            return None if isinstance(raw, (dict, list)) else humanize_warning(raw)
         if kind == "ts":
             return proto_timestamp(raw)
         if kind == "hhmm":
@@ -280,22 +298,22 @@ SPECS: tuple[Spec, ...] = (
     _s("days_to_service", "health", "daysToService", "Days to service", "Días hasta el servicio", device_class="duration", unit="d", state_class=M),
     _s("distance_to_service", "health", "distanceToServiceKm", "Distance to service", "Distancia hasta el servicio", device_class="distance", unit="km", state_class=M, precision=0),
     _s("engine_hours_to_service", "health", "engineHoursToService", "Engine hours to service", "Horas de motor hasta el servicio", unit="h", state_class=M, enabled=False),
-    _s("service_warning", "health", "serviceWarning", "Service warning", "Aviso de servicio", "text", icon="mdi:wrench-clock"),
-    _s("brake_fluid_warning", "health", "brakeFluidLevelWarning", "Brake fluid warning", "Aviso líquido de frenos", "text", category=DIAG),
-    _s("coolant_warning", "health", "engineCoolantLevelWarning", "Coolant warning", "Aviso refrigerante", "text", category=DIAG),
-    _s("oil_warning", "health", "oilLevelWarning", "Oil level warning", "Aviso nivel de aceite", "text", category=DIAG, enabled=False),
-    _s("washer_fluid_warning", "health", "washerFluidLevelWarning", "Washer fluid warning", "Aviso líquido lavaparabrisas", "text", category=DIAG),
-    _s("low_voltage_battery_warning", "health", "lowVoltageBatteryWarning", "12 V battery warning", "Aviso batería de 12 V", "text", category=DIAG),
+    _s("service_warning", "health", "serviceWarning", "Service warning", "Aviso de servicio", "warning", icon="mdi:wrench-clock"),
+    _s("brake_fluid_warning", "health", "brakeFluidLevelWarning", "Brake fluid warning", "Aviso líquido de frenos", "warning", category=DIAG),
+    _s("coolant_warning", "health", "engineCoolantLevelWarning", "Coolant warning", "Aviso refrigerante", "warning", category=DIAG),
+    _s("oil_warning", "health", "oilLevelWarning", "Oil level warning", "Aviso nivel de aceite", "warning", category=DIAG, enabled=False),
+    _s("washer_fluid_warning", "health", "washerFluidLevelWarning", "Washer fluid warning", "Aviso líquido lavaparabrisas", "warning", category=DIAG),
+    _s("low_voltage_battery_warning", "health", "lowVoltageBatteryWarning", "12 V battery warning", "Aviso batería de 12 V", "warning", category=DIAG),
     _s("tyre_pressure_front_left", "health", "frontLeftTyrePressureKpa", "Tyre pressure front left", "Presión neumático delantero izq.", device_class="pressure", unit="kPa", state_class=M, precision=0),
     _s("tyre_pressure_front_right", "health", "frontRightTyrePressureKpa", "Tyre pressure front right", "Presión neumático delantero der.", device_class="pressure", unit="kPa", state_class=M, precision=0),
     _s("tyre_pressure_rear_left", "health", "rearLeftTyrePressureKpa", "Tyre pressure rear left", "Presión neumático trasero izq.", device_class="pressure", unit="kPa", state_class=M, precision=0),
     _s("tyre_pressure_rear_right", "health", "rearRightTyrePressureKpa", "Tyre pressure rear right", "Presión neumático trasero der.", device_class="pressure", unit="kPa", state_class=M, precision=0),
     _s("tyre_reference_front", "health", "frontTyresReferencePressureKpa", "Front tyre reference pressure", "Presión recomendada eje delantero", device_class="pressure", unit="kPa", state_class=M, category=DIAG, precision=0),
     _s("tyre_reference_rear", "health", "rearTyresReferencePressureKpa", "Rear tyre reference pressure", "Presión recomendada eje trasero", device_class="pressure", unit="kPa", state_class=M, category=DIAG, precision=0),
-    _s("tyre_warning_front_left", "health", "frontLeftTyrePressureWarning", "Tyre warning front left", "Aviso neumático delantero izq.", "text", category=DIAG),
-    _s("tyre_warning_front_right", "health", "frontRightTyrePressureWarning", "Tyre warning front right", "Aviso neumático delantero der.", "text", category=DIAG),
-    _s("tyre_warning_rear_left", "health", "rearLeftTyrePressureWarning", "Tyre warning rear left", "Aviso neumático trasero izq.", "text", category=DIAG),
-    _s("tyre_warning_rear_right", "health", "rearRightTyrePressureWarning", "Tyre warning rear right", "Aviso neumático trasero der.", "text", category=DIAG),
+    _s("tyre_warning_front_left", "health", "frontLeftTyrePressureWarning", "Tyre warning front left", "Aviso neumático delantero izq.", "warning", category=DIAG),
+    _s("tyre_warning_front_right", "health", "frontRightTyrePressureWarning", "Tyre warning front right", "Aviso neumático delantero der.", "warning", category=DIAG),
+    _s("tyre_warning_rear_left", "health", "rearLeftTyrePressureWarning", "Tyre warning rear left", "Aviso neumático trasero izq.", "warning", category=DIAG),
+    _s("tyre_warning_rear_right", "health", "rearRightTyrePressureWarning", "Tyre warning rear right", "Aviso neumático trasero der.", "warning", category=DIAG),
     # ---- location (speed/altitude/heading; the tracker is a separate platform)
     _s("speed", "location", "speed", "Speed", "Velocidad", device_class="speed", unit="km/h", state_class=M, precision=0),
     _s("altitude", "location", "altitude", "Altitude", "Altitud", device_class="distance", unit="m", state_class=M, precision=0, enabled=False),

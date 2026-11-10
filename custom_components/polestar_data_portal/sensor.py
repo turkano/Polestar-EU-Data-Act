@@ -110,6 +110,8 @@ class PolestarSensor(PolestarSpecEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         attrs = dict(super().extra_state_attributes or {})
+        if self._spec.kind == "warning":
+            attrs["raw_state"] = self._spec.raw(self._payload(self._spec.endpoint))
         if self._spec.kind == "count":
             raw = self._spec.raw(self._payload(self._spec.endpoint))
             # Only simple values: never expose lists of objects (e.g. coordinates).
