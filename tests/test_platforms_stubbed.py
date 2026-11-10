@@ -56,6 +56,7 @@ def _install_stubs() -> None:
         "homeassistant.exceptions",
         "homeassistant.components",
         "homeassistant.components.sensor",
+        "homeassistant.components.image",
         "homeassistant.components.binary_sensor",
         "homeassistant.components.device_tracker",
         "homeassistant.components.device_tracker.config_entry",
@@ -65,6 +66,9 @@ def _install_stubs() -> None:
         "homeassistant.helpers.device_registry",
         "homeassistant.helpers.entity_platform",
         "homeassistant.helpers.selector",
+        "homeassistant.helpers.storage",
+        "homeassistant.util",
+        "homeassistant.util.dt",
         "homeassistant.helpers.update_coordinator",
     ]
     for name in names:
@@ -74,6 +78,25 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.core"].HomeAssistant = object
     sys.modules["homeassistant.helpers.device_registry"].DeviceInfo = dict
     sys.modules["homeassistant.components.diagnostics"].async_redact_data = lambda d, keys: d
+    import datetime as _dt
+
+    dt_util = sys.modules["homeassistant.util.dt"]
+    dt_util.utcnow = lambda: _dt.datetime.now(_dt.timezone.utc)
+    dt_util.now = lambda: _dt.datetime.now().astimezone()
+    dt_util.start_of_local_day = lambda d: _dt.datetime(d.year, d.month, d.day).astimezone()
+    sys.modules["homeassistant.util"].dt = dt_util
+
+    class _Store:
+        def __init__(self, *a, **k):
+            self.saved = None
+
+        async def async_load(self):
+            return None
+
+        def async_delay_save(self, data_func, delay):
+            self.saved = data_func()
+
+    sys.modules["homeassistant.helpers.storage"].Store = _Store
 
 
 _install_stubs()
@@ -92,7 +115,7 @@ sys.modules["pdp_ha"] = pkg
 
 MODULES = [
     "catalog", "api", "const", "coordinator", "entity", "sensor",
-    "binary_sensor", "device_tracker", "config_flow", "diagnostics", "__init__",
+    "binary_sensor", "device_tracker", "image", "config_flow", "diagnostics", "__init__",
 ]
 
 
@@ -124,17 +147,21 @@ class PlatformSmokeTests(unittest.TestCase):
             "timestamp": {"seconds": "1762730000", "nanos": 0},
             "batteryChargeLevelPercentage": 64,
             "chargingPowerWatts": 0,
+            "estimatedDistanceToEmptyKm": 320,
         }
+        odometer = {"odometerMeters": 52_000_000}
         exterior = {
             "centralLock": "LOCKED",
             "frontLeftDoor": "CLOSED",
+            "frontRightDoor": "OPEN",
             "hood": "SOMETHING_NEW",
         }
         location = {"coordinate": {"latitude": 28.1, "longitude": -15.4}, "speed": "0", "heading": 90}
         coord = types.SimpleNamespace(
             vins=["YSM123456"],
-            data={"YSM123456": {"battery": battery, "exterior": exterior, "location": location}},
-            endpoints=["battery", "exterior", "location"],
+            hass=None,
+            data={"YSM123456": {"battery": battery, "exterior": exterior, "location": location, "odometer": odometer}},
+            endpoints=["battery", "exterior", "location", "odometer"],
             client=types.SimpleNamespace(calls_today=7),
         )
         coord.unmapped = lambda: ["battery.someNewField", "health.other.field"]
@@ -158,7 +185,7 @@ class PlatformSmokeTests(unittest.TestCase):
         self.assertEqual(by_uid["YSM123456_battery_level"].native_value, 64.0)
         self.assertEqual(by_uid["YSM123456_charging_power"].native_value, 0.0)
         self.assertEqual(by_uid["YSM123456_speed"].native_value, 0.0)
-        self.assertNotIn("YSM123456_odometer", by_uid)  # endpoint not reported
+        self.assertEqual(by_uid["YSM123456_odometer"].native_value, 52000.0)
         self.assertIn("YSM123456_last_update", by_uid)
         self.assertEqual(by_uid["YSM123456_battery_level"].extra_state_attributes["reported_at"][:4], "2025")
         self.assertEqual(by_uid["entry1_api_calls_today"].native_value, 7)
@@ -168,6 +195,36 @@ class PlatformSmokeTests(unittest.TestCase):
             by_uid["entry1_unmapped_fields"].extra_state_attributes["fields"],
             ["battery.someNewField", "health.other.field"],
         )
+
+    def test_derived_sensors(self):
+        _, added = self._setup_platform("sensor")
+        by_uid = {e._attr_unique_id: e for e in added}
+        self.assertEqual(by_uid["YSM123456_range_at_full"].native_value, 500)  # 320 km at 64 % -> 500 km
+        self.assertNotIn("YSM123456_charge_end_time", by_uid)  # no time_to_full reported
+        month = by_uid["YSM123456_odometer_month"]
+        month._refresh()  # Home Assistant does this when the entity is added
+        self.assertEqual(month.native_value, 0.0)  # first reading is the baseline
+        self.assertEqual(month.extra_state_attributes["month"][:2], "20")
+        # a later reading in the same month adds the distance
+        month.coordinator.data["YSM123456"]["odometer"]["odometerMeters"] = 52_123_400
+        month._refresh()
+        self.assertEqual(month.native_value, 123.4)
+
+    def test_status_image(self):
+        _, added = self._setup_platform("image")
+        self.assertEqual(len(added), 1)
+        img = added[0]
+        img._refresh()  # Home Assistant does this when the entity is added
+        self.assertEqual(img._attr_unique_id, "YSM123456_status")
+        self.assertEqual(img._attr_content_type, "image/svg+xml")
+        self.assertIn("front_right_door", img.extra_state_attributes["open_parts"])
+        svg = asyncio.run(img.async_image()).decode()
+        self.assertTrue(svg.startswith("<svg"))
+        before = img._attr_image_last_updated
+        img.coordinator.data["YSM123456"]["exterior"]["frontRightDoor"] = "CLOSED"
+        img._refresh()
+        self.assertNotIn("front_right_door", img.extra_state_attributes["open_parts"])
+        self.assertGreaterEqual(img._attr_image_last_updated, before)
 
     def test_binary_sensors_keep_unknown_raw_values(self):
         _, added = self._setup_platform("binary_sensor")

@@ -290,7 +290,7 @@ def build(lang: str) -> dict:
             "error": {"no_endpoints": t["no_endpoints"], "too_many_calls": t["too_many_calls"]},
         },
         "selector": {"endpoints": {"options": {}}},
-        "entity": {"sensor": {}, "binary_sensor": {}, "device_tracker": {}},
+        "entity": {"sensor": {}, "binary_sensor": {}, "device_tracker": {}, "image": {}},
     }
     idx = {"en": None, "es": None, "fr": 0, "de": 1}[lang]
     for key, ep in catalog.ENDPOINTS.items():
@@ -306,6 +306,11 @@ def build(lang: str) -> dict:
     for key, names in catalog.ACCOUNT_ENTITIES.items():
         name = names[0] if lang == "en" else names[1] if lang == "es" else ACCOUNT_NAMES[key][idx]
         out["entity"]["sensor"][key] = {"name": name}
+    li = {"en": 0, "es": 1, "fr": 2, "de": 3}[lang]
+    for key, names in catalog.DERIVED_NAMES.items():
+        out["entity"]["sensor"][key] = {"name": names[li]}
+    for key, names in catalog.IMAGE_NAMES.items():
+        out["entity"]["image"][key] = {"name": names[li]}
     key, en, es = catalog.VEHICLE_LAST_UPDATE
     out["entity"]["sensor"][key] = {"name": en if lang == "en" else es if lang == "es" else LAST_UPDATE[idx]}
     tracker = catalog.TRACKER_NAME

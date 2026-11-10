@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 BASE_URL = "https://pc-api.polestar.com/eu-north-1/data-portal/m2m"
@@ -474,3 +474,139 @@ def payload_timestamp(payload: dict[str, Any] | None) -> datetime | None:
         if parsed:
             return parsed
     return None
+
+
+# --------------------------------------------------------------------------
+# Derived ("cooked") values: computed from several API fields
+# --------------------------------------------------------------------------
+
+# key: (en, es, fr, de)
+DERIVED_NAMES = {
+    "range_at_full": (
+        "Estimated range at 100%",
+        "Autonomía estimada al 100 %",
+        "Autonomie estimée à 100 %",
+        "Geschätzte Reichweite bei 100 %",
+    ),
+    "charge_end_time": (
+        "Charge end time",
+        "Fecha y hora de fin de carga",
+        "Heure de fin de charge",
+        "Ladeende",
+    ),
+    "odometer_month": (
+        "Distance this month",
+        "Kilometraje del mes",
+        "Distance ce mois-ci",
+        "Strecke diesen Monat",
+    ),
+}
+IMAGE_NAMES = {  # key: (en, es, fr, de)
+    "status": ("Vehicle status", "Estado del vehículo", "État du véhicule", "Fahrzeugstatus"),
+}
+
+# Below this battery level a linear extrapolation to 100 % is too noisy.
+MIN_SOC_FOR_RANGE_ESTIMATE = 5.0
+
+_NOT_CHARGING_TOKENS = {
+    "NOT", "NO", "STOPPED", "STOP", "DONE", "COMPLETE", "COMPLETED", "IDLE",
+    "ERROR", "FAULT", "SCHEDULED", "PAUSED", "UNSPECIFIED", "DISCONNECTED",
+}
+
+
+def _spec_value(key: str, payload: dict[str, Any] | None) -> Any:
+    return SPECS_BY_KEY[key].extract(payload)
+
+
+def range_at_full(battery: dict[str, Any] | None) -> float | None:
+    """Range extrapolated linearly to a 100 % battery."""
+    level = _spec_value("battery_level", battery)
+    rng = _spec_value("range", battery)
+    if level is None or rng is None or rng <= 0 or level < MIN_SOC_FOR_RANGE_ESTIMATE:
+        return None
+    return round(min(rng * 100.0 / level, 2000.0))
+
+
+def is_charging(battery: dict[str, Any] | None) -> bool | None:
+    """True/False when it can be told from the payload, else None.
+
+    The charging power is the primary signal because the status strings are
+    not documented; the status text is used only when no power is reported.
+    """
+    power = _spec_value("charging_power", battery)
+    if power is not None:
+        return power > 0
+    status = _spec_value("charging_status", battery)
+    if status is None:
+        return None
+    tokens = _tokens(status)
+    return "CHARGING" in tokens and not tokens & _NOT_CHARGING_TOKENS
+
+
+def charge_end_time(battery: dict[str, Any] | None, now: datetime) -> datetime | None:
+    """Moment the charge is expected to finish (reported time + minutes left)."""
+    minutes = _spec_value("time_to_full", battery)
+    if minutes is None or minutes <= 0 or is_charging(battery) is not True:
+        return None
+    base = payload_timestamp(battery) or now
+    end = (base + timedelta(minutes=minutes)).replace(second=0, microsecond=0)
+    return end if end >= now - timedelta(minutes=1) else None
+
+
+class MonthlyTracker:
+    """Distance driven in the current calendar month, from odometer readings.
+
+    The first reading ever seen is the baseline, so the first month only counts
+    from when the integration started. State is persisted by the caller.
+    """
+
+    def __init__(self) -> None:
+        self.month: str | None = None  # "YYYY-MM"
+        self.start: float | None = None
+        self.last: float | None = None
+        self.previous_month: str | None = None
+        self.previous_month_km: float | None = None
+        self.tracking_since: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MonthlyTracker":
+        tracker = cls()
+        for field in ("month", "start", "last", "previous_month", "previous_month_km", "tracking_since"):
+            setattr(tracker, field, data.get(field))
+        return tracker
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            f: getattr(self, f)
+            for f in ("month", "start", "last", "previous_month", "previous_month_km", "tracking_since")
+        }
+
+    def update(self, odometer_km: float, month: str, today: str) -> float:
+        """Register a reading and return the km driven this month."""
+        if self.month is None or self.start is None:
+            self.month, self.start, self.tracking_since = month, odometer_km, today
+        elif month != self.month:
+            if self.last is not None:
+                self.previous_month = self.month
+                self.previous_month_km = round(self.last - self.start, 1)
+            self.start = self.last if self.last is not None else odometer_km
+            self.month = month
+        if odometer_km < self.start:  # odometer replaced or glitch
+            self.start = odometer_km
+        self.last = odometer_km
+        return round(odometer_km - self.start, 1)
+
+
+DERIVED_SENSORS = tuple(DERIVED_NAMES)
+
+
+def derived_available(key: str, vehicle_data: dict[str, Any]) -> bool:
+    """Whether the inputs of a derived sensor are reported by this vehicle."""
+    battery = vehicle_data.get("battery")
+    if key == "range_at_full":
+        return _spec_value("battery_level", battery) is not None and _spec_value("range", battery) is not None
+    if key == "charge_end_time":
+        return _spec_value("time_to_full", battery) is not None
+    if key == "odometer_month":
+        return _spec_value("odometer", vehicle_data.get("odometer")) is not None
+    return False

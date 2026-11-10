@@ -4,7 +4,7 @@
 
 A Home Assistant custom integration that reads your vehicle data from the **official Polestar Data Portal API** (`data-portal.polestar.com`), the access Polestar provides to vehicle owners under the EU Data Act.
 
-> **Status: beta (v0.2.3).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
+> **Status: beta (v0.3.0).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
 
 - Read-only: no commands, no charging control.
 - Uses the official OAuth2 client-credentials API (no scraping, no Polestar ID password stored).
@@ -47,7 +47,7 @@ The portal allows **10,000 calls per client per day**. The options form refuses 
 |---|---|---|
 | Availability | on | availability status, usage mode |
 | Battery and charging | on | battery %, range, charging status/type/power/current/voltage, time to full, consumption, energy breakdown (driving/climate/battery/other), discharge info |
-| Doors, windows and locks | on | doors, windows, hood, tailgate, sunroof, central lock, alarm |
+| Doors, windows and locks | on | doors, windows, hood, tailgate, sunroof, central lock, alarm, status picture |
 | Health | on | days/km to service, warnings, tyre pressures, light warnings (summary, disabled by default) |
 | Location | on | device tracker, speed, altitude, heading |
 | Odometer and trips | on | odometer, trip meters, average speeds |
@@ -63,6 +63,27 @@ The portal allows **10,000 calls per client per day**. The options form refuses 
 Entities are created only when your vehicle actually reports the field, so a model without a sunroof gets no sunroof entity. Some endpoints are model-specific and answer 404 for other models; the integration skips those for 6 hours and tries again.
 
 Every sensor has a `reported_at` attribute with the timestamp the vehicle/portal reported for that data. The per-vehicle **Last update** sensor shows the newest one.
+
+## Calculated sensors
+
+Besides the raw fields, the integration creates a few sensors computed from them (only when the car reports the inputs):
+
+| Sensor | How it is calculated |
+|---|---|
+| **Estimated range at 100 %** | Current range × 100 / battery %. A linear extrapolation, so it is only an estimate; it is not shown below 5 % battery. |
+| **Charge end time** | Time reported by the car + "time to full charge". Only while charging (charging power > 0); *unknown* otherwise. It is a timestamp, so dashboards can show it as a date/time or "in 40 minutes". |
+| **Distance this month** | Odometer now minus the odometer at the start of the month. The value is stored, so it survives restarts and resets itself on the 1st. The first month only counts from the moment the integration first saw the odometer; the previous month's total is kept in the `previous_month_km` attribute. |
+
+## Vehicle status picture
+
+An **image** entity (`image.<vehicle>_vehicle_status`) draws a top-down view of the car and highlights what is open: doors and windows, hood, tailgate, sunroof, charge-port lid, and whether the car is locked (green padlock = locked, red = unlocked). Parts the car does not report are drawn faded. The picture is generated locally as an SVG from the *Doors, windows and locks* data (no download). Its `open_parts` attribute lists what is open, which is handy for automations.
+
+```yaml
+type: picture-entity
+entity: image.polestar_vehicle_status   # use your own entity id
+show_state: false
+show_name: false
+```
 
 ## Languages
 

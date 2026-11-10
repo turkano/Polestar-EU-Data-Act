@@ -15,7 +15,7 @@ from .coordinator import PolestarCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.DEVICE_TRACKER]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.DEVICE_TRACKER, Platform.IMAGE]
 
 type PolestarConfigEntry = ConfigEntry[PolestarCoordinator]
 
