@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Generate strings.json and translations/{en,es,fr,de}.json.
+"""Generate strings.json and translations/en.json from catalog.py.
 
-English and Spanish entity names live in catalog.py; French and German names
-are in the tables below. The script fails if any entity is missing a name in
-any language, so a new catalog entry cannot ship half-translated.
+Translations into other languages are managed in Crowdin (see crowdin.yml):
+Crowdin takes translations/en.json as its source and opens pull requests with
+the translated files. By default this script therefore writes ONLY the English
+files and never touches es/fr/de/... so it cannot overwrite Crowdin's work.
 
-Run from the repository root:  python3 tools/build_translations.py
+The Spanish names live in catalog.py and the French/German tables below. They
+are kept only to seed or rebuild those three languages:
+
+    python3 tools/build_translations.py          # English only (normal use)
+    python3 tools/build_translations.py --seed   # also es/fr/de (overwrites them!)
+
+Run from the repository root.
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COMP = ROOT / "custom_components" / "polestar_data_portal"
-LANGS = ("en", "es", "fr", "de")
+LANGS = ("en", "es", "fr", "de")  # languages --seed can build
 
 # Load catalog.py without importing the package (which needs Home Assistant).
 spec = importlib.util.spec_from_file_location("catalog", COMP / "catalog.py")
@@ -309,6 +316,8 @@ def build(lang: str) -> dict:
 
 
 def main() -> None:
+    seed = "--seed" in sys.argv[1:]
+    langs = LANGS if seed else ("en",)
     tdir = COMP / "translations"
     tdir.mkdir(exist_ok=True)
     built = {lang: build(lang) for lang in LANGS}
@@ -322,12 +331,12 @@ def main() -> None:
         if shape(built[lang]) != reference:
             raise SystemExit(f"Translation structure mismatch in {lang}")
 
-    for lang, data in built.items():
-        text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    for lang in langs:
+        text = json.dumps(built[lang], indent=2, ensure_ascii=False) + "\n"
         (tdir / f"{lang}.json").write_text(text, encoding="utf-8")
         if lang == "en":
             (COMP / "strings.json").write_text(text, encoding="utf-8")
-    print("Wrote strings.json and translations/" + ", ".join(f"{l}.json" for l in LANGS))
+    print("Wrote strings.json and translations/" + ", ".join(f"{l}.json" for l in langs))
 
 
 if __name__ == "__main__":
