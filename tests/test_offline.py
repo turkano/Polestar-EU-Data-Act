@@ -229,56 +229,63 @@ class ExtendedCatalogTests(unittest.TestCase):
 
 
 class TranslationTests(unittest.TestCase):
-    LANGS = ("en", "es", "fr", "de")
+    """English is generated from catalog.py; other languages come from Crowdin.
+
+    Crowdin files may be incomplete (HA falls back to English per key), so the
+    other languages are only checked for stale keys and placeholders.
+    """
 
     @classmethod
     def setUpClass(cls):
         import json
 
-        cls.data = {
-            lang: json.loads((COMP / "translations" / f"{lang}.json").read_text(encoding="utf-8"))
-            for lang in cls.LANGS
-        }
+        tdir = COMP / "translations"
+        cls.data = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in sorted(tdir.glob("*.json"))}
+        cls.en = cls.data["en"]
 
-    def test_every_entity_has_a_name_in_every_language(self):
-        for lang in self.LANGS:
-            entity = self.data[lang]["entity"]
-            for s in catalog.SPECS:
-                name = entity[s.platform][s.key]["name"]
-                self.assertTrue(name.strip(), f"{lang}:{s.key}")
-            for key in catalog.ACCOUNT_ENTITIES:
-                self.assertTrue(entity["sensor"][key]["name"].strip(), f"{lang}:{key}")
-            self.assertTrue(entity["sensor"]["last_update"]["name"])
-            self.assertTrue(entity["device_tracker"]["location"]["name"])
+    @staticmethod
+    def leaves(node, prefix=""):
+        out = {}
+        for k, v in node.items():
+            if isinstance(v, dict):
+                out.update(TranslationTests.leaves(v, f"{prefix}{k}."))
+            else:
+                out[f"{prefix}{k}"] = v
+        return out
 
-    def test_same_keys_everywhere(self):
-        def keys(node, prefix=""):
-            out = set()
-            if isinstance(node, dict):
-                for k, v in node.items():
-                    out |= {f"{prefix}{k}"} | keys(v, f"{prefix}{k}.")
-            return out
+    def test_expected_languages_present(self):
+        for lang in ("en", "es", "fr", "de"):
+            self.assertIn(lang, self.data)
 
-        reference = keys(self.data["en"])
-        for lang in self.LANGS:
-            self.assertEqual(keys(self.data[lang]), reference, lang)
+    def test_every_entity_has_an_english_name(self):
+        entity = self.en["entity"]
+        for s in catalog.SPECS:
+            self.assertTrue(entity[s.platform][s.key]["name"].strip(), s.key)
+        for key in catalog.ACCOUNT_ENTITIES:
+            self.assertTrue(entity["sensor"][key]["name"].strip(), key)
+        self.assertTrue(entity["sensor"]["last_update"]["name"])
+        self.assertTrue(entity["device_tracker"]["location"]["name"])
+
+    def test_no_stale_keys_in_other_languages(self):
+        reference = set(self.leaves(self.en))
+        for lang, data in self.data.items():
+            extra = set(self.leaves(data)) - reference
+            self.assertFalse(extra, f"{lang}: keys not in English: {sorted(extra)[:5]}")
 
     def test_placeholders_preserved(self):
-        for lang in self.LANGS:
-            desc = self.data[lang]["options"]["step"]["init"]["description"]
-            self.assertIn("{vehicles}", desc, lang)
-            self.assertIn("{limit}", desc, lang)
+        import re
 
-    def test_languages_really_differ(self):
-        for key in ("battery_level", "range", "odometer"):
-            names = {self.data[l]["entity"]["sensor"][key]["name"] for l in self.LANGS}
-            self.assertGreater(len(names), 2, key)
+        ref = self.leaves(self.en)
+        for lang, data in self.data.items():
+            for key, text in self.leaves(data).items():
+                want = set(re.findall(r"\{\w+\}", ref[key]))
+                self.assertEqual(set(re.findall(r"\{\w+\}", text)), want, f"{lang}:{key}")
 
     def test_strings_json_matches_english(self):
         import json
 
         strings = json.loads((COMP / "strings.json").read_text(encoding="utf-8"))
-        self.assertEqual(strings, self.data["en"])
+        self.assertEqual(strings, self.en)
 
 
 class BrandTests(unittest.TestCase):
