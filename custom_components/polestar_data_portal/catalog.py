@@ -163,20 +163,45 @@ def unlocked_state(value: Any) -> bool | None:
 # --------------------------------------------------------------------------
 
 
-def humanize_warning(value: Any) -> str | None:
-    """Short readable form of a warning enum.
+def _snake_upper(name: str) -> str:
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).upper()
 
-    The API repeats the field name inside the value, e.g.
-    ``LOW_VOLTAGE_BATTERY_WARNING_NO_WARNING``; only the part after the last
-    ``_WARNING_`` carries information, so that becomes ``No warning``.
+
+def humanize_enum(value: Any, field: str | None = None) -> str | None:
+    """Short readable form of an enum string such as ``CHARGING_TYPE_NONE``.
+
+    The API prefixes every value with the name of the enum type, which is
+    usually the field name in UPPER_SNAKE_CASE (``chargingType`` ->
+    ``CHARGING_TYPE_``). Removing that prefix leaves the part that carries the
+    information (``NONE``), shown as ``None``. Warnings repeat the field name
+    in a longer form (``LOW_VOLTAGE_BATTERY_WARNING_NO_WARNING``), so the text
+    after the last ``_WARNING_`` is used when no prefix matched. Values that
+    do not follow either pattern are only prettified, never dropped.
     """
     text = str(value).strip()
     if not text:
         return None
-    if "_WARNING_" in text:
+    stripped = False
+    if field:
+        base = _snake_upper(field)
+        bases = [base]
+        unversioned = re.sub(r"_V\d+$", "", base)  # chargingStatusV2 may use CHARGING_STATUS_
+        if unversioned != base:
+            bases.append(unversioned)
+        prefixes = [b + suffix for b in bases for suffix in ("_STATUS_", "_")]
+        for prefix in prefixes:  # alarm -> ALARM_STATUS_
+            if text.startswith(prefix) and len(text) > len(prefix):
+                text, stripped = text[len(prefix):], True
+                break
+    if not stripped and "_WARNING_" in text:
         text = text.rsplit("_WARNING_", 1)[1]
     text = text.replace("_", " ").strip().lower()
     return text[:1].upper() + text[1:] if text else None
+
+
+def humanize_warning(value: Any) -> str | None:
+    """Kept for compatibility: enum text without a known field name."""
+    return humanize_enum(value)
 
 
 @dataclass(frozen=True)
@@ -187,7 +212,7 @@ class Spec:
     endpoint: str
     platform: str  # "sensor" | "binary_sensor"
     paths: tuple[str, ...]  # first path with a value wins
-    kind: str  # num | text | warning | ts | m_to_km | hhmm | bool | opening | unlocked | count
+    kind: str  # num | text | enum | warning | ts | m_to_km | hhmm | bool | opening | unlocked | count
     name_en: str
     name_es: str
     device_class: str | None = None
@@ -203,9 +228,11 @@ class Spec:
         if not data:
             return None
         raw = None
+        used = self.paths[0]
         for path in self.paths:
             raw = get_path(data, path)
             if raw is not None:
+                used = path
                 break
         if raw is None:
             return None
@@ -219,8 +246,8 @@ class Spec:
             if isinstance(raw, (dict, list)):
                 return None
             return str(raw)
-        if kind == "warning":
-            return None if isinstance(raw, (dict, list)) else humanize_warning(raw)
+        if kind in ("enum", "warning"):
+            return None if isinstance(raw, (dict, list)) else humanize_enum(raw, used.rsplit(".", 1)[-1])
         if kind == "ts":
             return proto_timestamp(raw)
         if kind == "hhmm":
@@ -257,16 +284,16 @@ M = "measurement"
 
 SPECS: tuple[Spec, ...] = (
     # ---- availability ----------------------------------------------------
-    _s("availability_status", "availability", "availabilityStatus", "Availability", "Disponibilidad", "text", icon="mdi:cloud-check"),
-    _s("usage_mode", "availability", "usageMode", "Usage mode", "Modo de uso", "text", icon="mdi:car-cog"),
-    _s("unavailable_reason", "availability", "unavailableReason", "Unavailable reason", "Motivo de no disponibilidad", "text", category=DIAG),
+    _s("availability_status", "availability", "availabilityStatus", "Availability", "Disponibilidad", "enum", icon="mdi:cloud-check"),
+    _s("usage_mode", "availability", "usageMode", "Usage mode", "Modo de uso", "enum", icon="mdi:car-cog"),
+    _s("unavailable_reason", "availability", "unavailableReason", "Unavailable reason", "Motivo de no disponibilidad", "enum", category=DIAG),
     # ---- battery ---------------------------------------------------------
     _s("battery_level", "battery", "batteryChargeLevelPercentage", "Battery", "Batería", device_class="battery", unit="%", state_class=M),
     _s("range", "battery", "estimatedDistanceToEmptyKm", "Range", "Autonomía", device_class="distance", unit="km", state_class=M, precision=0),
-    _s("charging_status", "battery", ("chargingStatusV2", "chargingStatus"), "Charging status", "Estado de carga", "text", icon="mdi:ev-station"),
-    _s("charger_connection_status", "battery", "chargerConnectionStatus", "Charger connection", "Conexión del cargador", "text", icon="mdi:ev-plug-type2"),
-    _s("charger_power_status", "battery", "chargerPowerStatus", "Charger power status", "Estado de potencia del cargador", "text"),
-    _s("charging_type", "battery", "chargingType", "Charging type", "Tipo de carga", "text"),
+    _s("charging_status", "battery", ("chargingStatusV2", "chargingStatus"), "Charging status", "Estado de carga", "enum", icon="mdi:ev-station"),
+    _s("charger_connection_status", "battery", "chargerConnectionStatus", "Charger connection", "Conexión del cargador", "enum", icon="mdi:ev-plug-type2"),
+    _s("charger_power_status", "battery", "chargerPowerStatus", "Charger power status", "Estado de potencia del cargador", "enum"),
+    _s("charging_type", "battery", "chargingType", "Charging type", "Tipo de carga", "enum"),
     _s("charging_power", "battery", "chargingPowerWatts", "Charging power", "Potencia de carga", device_class="power", unit="W", state_class=M),
     _s("charging_current", "battery", "chargingCurrentAmps", "Charging current", "Corriente de carga", device_class="current", unit="A", state_class=M),
     _s("charging_voltage", "battery", "chargingVoltageVolts", "Charging voltage", "Tensión de carga", device_class="voltage", unit="V", state_class=M),
@@ -277,7 +304,7 @@ SPECS: tuple[Spec, ...] = (
     _s("consumption_since_charge", "battery", "averageEnergyConsumptionKwhPer100KmSinceCharge", "Consumption since charge", "Consumo desde la última carga", unit="kWh/100km", state_class=M, precision=1, icon="mdi:lightning-bolt"),
     _s("consumption_automatic", "battery", "averageEnergyConsumptionKwhPer100KmAutomatic", "Consumption (automatic trip)", "Consumo (viaje automático)", unit="kWh/100km", state_class=M, precision=1, enabled=False, icon="mdi:lightning-bolt"),
     _s("total_energy_consumption", "battery", "totalEnergyConsumptionWh", "Total energy consumption", "Consumo total de energía", device_class="energy", unit="Wh", enabled=False),
-    _s("preconditioning_status", "battery", "manualPreconditioning.preconditioningStatus", "Preconditioning", "Preacondicionamiento", "text", icon="mdi:air-conditioner"),
+    _s("preconditioning_status", "battery", "manualPreconditioning.preconditioningStatus", "Preconditioning", "Preacondicionamiento", "enum", icon="mdi:air-conditioner"),
     # ---- exterior --------------------------------------------------------
     _s("central_lock", "exterior", "centralLock", "Central lock", "Cierre centralizado", "unlocked", "binary_sensor", device_class="lock"),
     _s("tailgate_lock", "exterior", "tailgateLock", "Tailgate lock", "Cierre del portón", "unlocked", "binary_sensor", device_class="lock"),
@@ -293,7 +320,7 @@ SPECS: tuple[Spec, ...] = (
     _s("tailgate", "exterior", "tailgate", "Tailgate", "Portón trasero", "opening", "binary_sensor", device_class="opening"),
     _s("tank_lid", "exterior", "tankLid", "Charge port / tank lid", "Tapa de carga / depósito", "opening", "binary_sensor", device_class="opening"),
     _s("sunroof", "exterior", "sunroof", "Sunroof", "Techo solar", "opening", "binary_sensor", device_class="opening"),
-    _s("alarm", "exterior", "alarm", "Alarm", "Alarma", "text", icon="mdi:alarm-light"),
+    _s("alarm", "exterior", "alarm", "Alarm", "Alarma", "enum", icon="mdi:alarm-light"),
     # ---- health ----------------------------------------------------------
     _s("days_to_service", "health", "daysToService", "Days to service", "Días hasta el servicio", device_class="duration", unit="d", state_class=M),
     _s("distance_to_service", "health", "distanceToServiceKm", "Distance to service", "Distancia hasta el servicio", device_class="distance", unit="km", state_class=M, precision=0),
@@ -328,23 +355,23 @@ SPECS: tuple[Spec, ...] = (
     _s("average_speed_since_charge", "odometer", "averageSpeedKmPerHourSinceCharge", "Average speed since charge", "Velocidad media desde la carga", device_class="speed", unit="km/h", state_class=M, precision=0, enabled=False),
     # ---- charge target ---------------------------------------------------
     _s("target_soc", "target_soc", "targetSoc.batteryChargeTargetLevel", "Charge target", "Objetivo de carga", unit="%", state_class=M, icon="mdi:battery-charging-high"),
-    _s("target_soc_type", "target_soc", "targetSoc.chargeTargetLevelSettingType", "Charge target type", "Tipo de objetivo de carga", "text", category=DIAG),
-    _s("target_soc_source", "target_soc", "targetSoc.source", "Charge target source", "Origen del objetivo de carga", "text", category=DIAG, enabled=False),
+    _s("target_soc_type", "target_soc", "targetSoc.chargeTargetLevelSettingType", "Charge target type", "Tipo de objetivo de carga", "enum", category=DIAG),
+    _s("target_soc_source", "target_soc", "targetSoc.source", "Charge target source", "Origen del objetivo de carga", "enum", category=DIAG, enabled=False),
     # ---- parking climatization ------------------------------------------
-    _s("climate_running_status", "parking_climatization", "runningStatus", "Parking climate status", "Estado climatización en parado", "text", icon="mdi:air-conditioner"),
-    _s("climate_main_running_status", "parking_climatization", "mainClimateRunningStatus", "Main climate status", "Estado climatización principal", "text"),
-    _s("climate_ventilation", "parking_climatization", "ventilation", "Ventilation", "Ventilación", "text"),
+    _s("climate_running_status", "parking_climatization", "runningStatus", "Parking climate status", "Estado climatización en parado", "enum", icon="mdi:air-conditioner"),
+    _s("climate_main_running_status", "parking_climatization", "mainClimateRunningStatus", "Main climate status", "Estado climatización principal", "enum"),
+    _s("climate_ventilation", "parking_climatization", "ventilation", "Ventilation", "Ventilación", "enum"),
     _s("climate_current_temperature", "parking_climatization", "currentCompartmentTemperatureCelsius", "Cabin temperature", "Temperatura del habitáculo", device_class="temperature", unit="°C", state_class=M, precision=1),
     _s("climate_requested_temperature", "parking_climatization", "requestedCompartmentTemperatureCelsius", "Requested cabin temperature", "Temperatura solicitada", device_class="temperature", unit="°C", state_class=M, precision=1),
     _s("climate_started_at", "parking_climatization", "startedAt", "Climate started at", "Climatización iniciada", "ts", device_class="timestamp", category=DIAG),
     _s("climate_ending_at", "parking_climatization", "endingAt", "Climate ending at", "Climatización termina", "ts", device_class="timestamp", category=DIAG),
-    _s("climate_start_reason", "parking_climatization", "startReason", "Climate start reason", "Motivo de inicio", "text", category=DIAG),
+    _s("climate_start_reason", "parking_climatization", "startReason", "Climate start reason", "Motivo de inicio", "enum", category=DIAG),
     # ---- pre-cleaning ----------------------------------------------------
-    _s("pre_cleaning_status", "pre_cleaning", "runningStatus", "Pre-cleaning status", "Estado limpieza previa", "text", icon="mdi:air-filter"),
+    _s("pre_cleaning_status", "pre_cleaning", "runningStatus", "Pre-cleaning status", "Estado limpieza previa", "enum", icon="mdi:air-filter"),
     _s("air_quality_index", "pre_cleaning", "measuredAirQualityIndex", "Air quality index", "Índice de calidad del aire", state_class=M, icon="mdi:air-filter"),
     _s("particulate_matter_25", "pre_cleaning", "measuredParticulateMatter25", "Particulate matter PM2.5", "Partículas PM2.5", state_class=M),
     _s("pre_cleaning_last_cycle", "pre_cleaning", "lastCycleCompleted", "Last pre-cleaning cycle", "Último ciclo de limpieza previa", "ts", device_class="timestamp", category=DIAG),
-    _s("pre_cleaning_error", "pre_cleaning", "error", "Pre-cleaning error", "Error limpieza previa", "text", category=DIAG),
+    _s("pre_cleaning_error", "pre_cleaning", "error", "Pre-cleaning error", "Error limpieza previa", "enum", category=DIAG),
     # ---- charging settings -----------------------------------------------
     _s("amp_limit", "amp_limit", "ampLimit.ampLimit", "Charging current limit", "Límite de corriente de carga", device_class="current", unit="A", state_class=M),
     _s("charge_now", "charge_now", "syncedOverrideChargeTimer.override", "Charge Now", "Carga inmediata", "bool", "binary_sensor", icon="mdi:flash"),
@@ -365,11 +392,11 @@ _EXTRA_SPECS: tuple[Spec, ...] = (
     # ---- health: all light warnings summarised (raw values in attributes) -----
     _s("light_warnings", "health", "lightWarnings", "Light warnings reported", "Luces reportadas", "count", category=DIAG, enabled=False, icon="mdi:car-light-high"),
     # ---- parking climatization extras ------------------------------------
-    _s("climate_seat_front_left", "parking_climatization", "requestedFrontLeftSeat", "Requested seat heating front left", "Calefacción asiento delantero izq. solicitada", "text", enabled=False, icon="mdi:car-seat-heater"),
-    _s("climate_seat_front_right", "parking_climatization", "requestedFrontRightSeat", "Requested seat heating front right", "Calefacción asiento delantero der. solicitada", "text", enabled=False, icon="mdi:car-seat-heater"),
-    _s("climate_seat_rear_left", "parking_climatization", "requestedRearLeftSeat", "Requested seat heating rear left", "Calefacción asiento trasero izq. solicitada", "text", enabled=False, icon="mdi:car-seat-heater"),
-    _s("climate_seat_rear_right", "parking_climatization", "requestedRearRightSeat", "Requested seat heating rear right", "Calefacción asiento trasero der. solicitada", "text", enabled=False, icon="mdi:car-seat-heater"),
-    _s("climate_steering_wheel", "parking_climatization", "requestedSteeringWheelHeating", "Requested steering wheel heating", "Calefacción del volante solicitada", "text", enabled=False, icon="mdi:steering"),
+    _s("climate_seat_front_left", "parking_climatization", "requestedFrontLeftSeat", "Requested seat heating front left", "Calefacción asiento delantero izq. solicitada", "enum", enabled=False, icon="mdi:car-seat-heater"),
+    _s("climate_seat_front_right", "parking_climatization", "requestedFrontRightSeat", "Requested seat heating front right", "Calefacción asiento delantero der. solicitada", "enum", enabled=False, icon="mdi:car-seat-heater"),
+    _s("climate_seat_rear_left", "parking_climatization", "requestedRearLeftSeat", "Requested seat heating rear left", "Calefacción asiento trasero izq. solicitada", "enum", enabled=False, icon="mdi:car-seat-heater"),
+    _s("climate_seat_rear_right", "parking_climatization", "requestedRearRightSeat", "Requested seat heating rear right", "Calefacción asiento trasero der. solicitada", "enum", enabled=False, icon="mdi:car-seat-heater"),
+    _s("climate_steering_wheel", "parking_climatization", "requestedSteeringWheelHeating", "Requested steering wheel heating", "Calefacción del volante solicitada", "enum", enabled=False, icon="mdi:steering"),
     _s("climate_errors", "parking_climatization", "errors", "Parking climate errors", "Errores de climatización en parado", "count", category=DIAG),
     _s("climate_warnings", "parking_climatization", "warnings", "Parking climate warnings", "Avisos de climatización en parado", "count", category=DIAG),
 )
@@ -512,6 +539,12 @@ DERIVED_NAMES = {
         "Heure de fin de charge",
         "Ladeende",
     ),
+    "charging_power_calc": (
+        "Charging power (calculated)",
+        "Potencia de carga (calculada)",
+        "Puissance de charge (calculée)",
+        "Ladeleistung (berechnet)",
+    ),
     "odometer_month": (
         "Distance this month",
         "Kilometraje del mes",
@@ -571,6 +604,15 @@ def charge_end_time(battery: dict[str, Any] | None, now: datetime) -> datetime |
     return end if end >= now - timedelta(minutes=1) else None
 
 
+def charging_power_kw(battery: dict[str, Any] | None) -> float | None:
+    """Charging power in kW from the reported voltage and current (V x A)."""
+    volts = _spec_value("charging_voltage", battery)
+    amps = _spec_value("charging_current", battery)
+    if volts is None or amps is None or volts < 0 or amps < 0:
+        return None
+    return round(volts * amps / 1000.0, 2)
+
+
 class MonthlyTracker:
     """Distance driven in the current calendar month, from odometer readings.
 
@@ -625,6 +667,8 @@ def derived_available(key: str, vehicle_data: dict[str, Any]) -> bool:
         return _spec_value("battery_level", battery) is not None and _spec_value("range", battery) is not None
     if key == "charge_end_time":
         return _spec_value("time_to_full", battery) is not None
+    if key == "charging_power_calc":
+        return charging_power_kw(battery) is not None
     if key == "odometer_month":
         return _spec_value("odometer", vehicle_data.get("odometer")) is not None
     return False

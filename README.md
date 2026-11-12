@@ -4,7 +4,7 @@
 
 A Home Assistant custom integration that reads your vehicle data from the **official Polestar Data Portal API** (`data-portal.polestar.com`), the access Polestar provides to vehicle owners under the EU Data Act.
 
-> **Status: beta (v0.3.1).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
+> **Status: beta (v0.3.2).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
 
 - Read-only: no commands, no charging control.
 - Uses the official OAuth2 client-credentials API (no scraping, no Polestar ID password stored).
@@ -71,6 +71,7 @@ Besides the raw fields, the integration creates a few sensors computed from them
 | Sensor | How it is calculated |
 |---|---|
 | **Estimated range at 100 %** | Current range × 100 / battery %. A linear extrapolation, so it is only an estimate; it is not shown below 5 % battery. |
+| **Charging power (calculated)** | Charging voltage × charging current, in kW. Exact for DC and single-phase charging; for three-phase AC it can read lower than the real power, depending on whether the car reports phase or line voltage. The attributes `voltage_v`, `current_a` and `reported_power_w` let you compare. |
 | **Charge end time** | Time reported by the car + "time to full charge". Only while charging (charging power > 0); *unknown* otherwise. It is a timestamp, so dashboards can show it as a date/time or "in 40 minutes". |
 | **Distance this month** | Odometer now minus the odometer at the start of the month. The value is stored, so it survives restarts and resets itself on the 1st. The first month only counts from the moment the integration first saw the odometer; the previous month's total is kept in the `previous_month_km` attribute. |
 
@@ -104,7 +105,7 @@ Open an issue with those names and (if the value is a status string) the raw val
 
 ## Known limitations
 
-- **Warning sensors** (service, brake fluid, coolant, oil, washer fluid, 12 V battery, tyres) show only the meaningful part of the API value, e.g. `LOW_VOLTAGE_BATTERY_WARNING_NO_WARNING` becomes *No warning*. The original text is in the `raw_state` attribute.
+- **Status texts are shortened.** The API repeats the enum name inside every value, so text sensors (charging status, charger connection, availability, usage mode, alarm, warnings ...) drop that prefix: `CHARGER_CONNECTION_STATUS_DISCONNECTED` is shown as *Disconnected*, `LOW_VOLTAGE_BATTERY_WARNING_NO_WARNING` as *No warning*. The original text is in the `raw_state` attribute; use that in automations if you need the exact API value. Shortened texts are in English because the possible values are not documented.
 - **Enum values are not documented.** For status fields (charging status, warnings, door states …) the API documents plain strings without listing possible values. Text sensors show the raw value. Door/window/lock binary sensors interpret values containing *open/closed/locked/unlocked*; the raw value is always in the `raw_state` attribute, and the state stays *unknown* if a value isn't recognised. If you see unknown values, open an issue with the raw value.
 - Individual light warnings are exposed only as a summary sensor (count + raw values in attributes, disabled by default) until the possible values are known. Charge timers, departure times and per-location charging profiles are not mapped yet.
 - Units of the discharge-info fields are not documented, so they are shown without a unit.

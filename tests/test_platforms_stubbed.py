@@ -148,6 +148,8 @@ class PlatformSmokeTests(unittest.TestCase):
             "batteryChargeLevelPercentage": 64,
             "chargingPowerWatts": 0,
             "estimatedDistanceToEmptyKm": 320,
+            "chargingVoltageVolts": 230,
+            "chargingCurrentAmps": 16,
         }
         odometer = {"odometerMeters": 52_000_000}
         exterior = {
@@ -200,6 +202,9 @@ class PlatformSmokeTests(unittest.TestCase):
         _, added = self._setup_platform("sensor")
         by_uid = {e._attr_unique_id: e for e in added}
         self.assertEqual(by_uid["YSM123456_range_at_full"].native_value, 500)  # 320 km at 64 % -> 500 km
+        calc = by_uid["YSM123456_charging_power_calc"]
+        self.assertEqual(calc.native_value, 3.68)
+        self.assertEqual(calc.extra_state_attributes["current_a"], 16.0)
         self.assertNotIn("YSM123456_charge_end_time", by_uid)  # no time_to_full reported
         month = by_uid["YSM123456_odometer_month"]
         month._refresh()  # Home Assistant does this when the entity is added

@@ -29,6 +29,7 @@ from .catalog import (
     MonthlyTracker,
     Spec,
     charge_end_time,
+    charging_power_kw,
     derived_available,
     payload_timestamp,
     range_at_full,
@@ -110,7 +111,7 @@ class PolestarSensor(PolestarSpecEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         attrs = dict(super().extra_state_attributes or {})
-        if self._spec.kind == "warning":
+        if self._spec.kind in ("enum", "warning"):
             attrs["raw_state"] = self._spec.raw(self._payload(self._spec.endpoint))
         if self._spec.kind == "count":
             raw = self._spec.raw(self._payload(self._spec.endpoint))
@@ -128,7 +129,13 @@ class PolestarDerivedSensor(PolestarVehicleEntity, SensorEntity):
     def __init__(self, coordinator: PolestarCoordinator, vin: str, key: str) -> None:
         super().__init__(coordinator, vin, key)
         self._key = key
-        if key == "range_at_full":
+        if key == "charging_power_calc":
+            self._attr_device_class = SensorDeviceClass.POWER
+            self._attr_native_unit_of_measurement = "kW"
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_suggested_display_precision = 2
+            self._attr_icon = "mdi:ev-station"
+        elif key == "range_at_full":
             self._attr_device_class = SensorDeviceClass.DISTANCE
             self._attr_native_unit_of_measurement = "km"
             self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -143,6 +150,8 @@ class PolestarDerivedSensor(PolestarVehicleEntity, SensorEntity):
 
     @property
     def native_value(self) -> Any:
+        if self._key == "charging_power_calc":
+            return charging_power_kw(self._battery())
         if self._key == "range_at_full":
             return range_at_full(self._battery())
         return charge_end_time(self._battery(), dt_util.utcnow())
@@ -150,6 +159,14 @@ class PolestarDerivedSensor(PolestarVehicleEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         battery = self._battery()
+        if self._key == "charging_power_calc":
+            reported = SPECS_BY_KEY["charging_power"].extract(battery)
+            return {
+                "voltage_v": SPECS_BY_KEY["charging_voltage"].extract(battery),
+                "current_a": SPECS_BY_KEY["charging_current"].extract(battery),
+                "reported_power_w": reported,
+                "note": "Voltage x current. For three-phase AC this can read lower than the real power.",
+            }
         if self._key == "range_at_full":
             return {
                 "battery_level": SPECS_BY_KEY["battery_level"].extract(battery),
