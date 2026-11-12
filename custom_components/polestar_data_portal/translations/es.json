@@ -382,6 +382,9 @@
       "charge_end_time": {
         "name": "Fecha y hora de fin de carga"
       },
+      "charging_power_calc": {
+        "name": "Charging power (calculated)"
+      },
       "odometer_month": {
         "name": "Kilometraje del mes"
       },
