@@ -383,7 +383,7 @@
         "name": "Ladeende"
       },
       "charging_power_calc": {
-        "name": "Charging power (calculated)"
+        "name": "Ladeleistung (berechnet)"
       },
       "odometer_month": {
         "name": "Strecke diesen Monat"
