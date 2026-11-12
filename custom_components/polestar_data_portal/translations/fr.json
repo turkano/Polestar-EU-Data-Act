@@ -383,7 +383,7 @@
         "name": "Heure de fin de charge"
       },
       "charging_power_calc": {
-        "name": "Charging power (calculated)"
+        "name": "Puissance de charge (calculée)"
       },
       "odometer_month": {
         "name": "Distance ce mois-ci"
