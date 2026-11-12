@@ -382,6 +382,9 @@
       "charge_end_time": {
         "name": "Ladeende"
       },
+      "charging_power_calc": {
+        "name": "Charging power (calculated)"
+      },
       "odometer_month": {
         "name": "Strecke diesen Monat"
       },
