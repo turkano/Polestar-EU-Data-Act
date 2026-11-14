@@ -385,6 +385,18 @@
       "charging_power_calc": {
         "name": "Potencia de carga (calculada)"
       },
+      "last_trip_distance": {
+        "name": "Last trip distance"
+      },
+      "last_trip_consumption": {
+        "name": "Last trip consumption"
+      },
+      "last_trip_energy": {
+        "name": "Last trip energy used"
+      },
+      "last_trip_end": {
+        "name": "Last trip ended"
+      },
       "odometer_month": {
         "name": "Kilometraje del mes"
       },
