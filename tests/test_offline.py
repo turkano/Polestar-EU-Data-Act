@@ -10,7 +10,7 @@ import importlib
 import sys
 import types
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 COMP = Path(__file__).resolve().parents[1] / "custom_components" / "polestar_data_portal"
@@ -226,6 +226,73 @@ class ExtendedCatalogTests(unittest.TestCase):
             catalog.unmapped_fields("parking_climatization", {"runningStatus": "ON", "errors": [], "requestedFrontLeftSeat": "OFF"}),
             [],
         )
+
+
+class IdleZeroTests(unittest.TestCase):
+    def test_zero_only_when_known_not_charging(self):
+        spec = catalog.SPECS_BY_KEY["charging_voltage"]
+        self.assertEqual(spec.current({"chargingStatusV2": "CHARGING_STATUS_V2_IDLE"}), 0.0)
+        self.assertIsNone(spec.current({"chargingStatusV2": "CHARGING_STATUS_V2_CHARGING"}))
+        self.assertIsNone(spec.current({"batteryChargeLevelPercentage": 50}))
+        self.assertIsNone(spec.current(None))
+        self.assertEqual(spec.current({"chargingVoltageVolts": 231}), 231.0)
+
+    def test_other_specs_unaffected(self):
+        spec = catalog.SPECS_BY_KEY["battery_level"]
+        self.assertIsNone(spec.current({"chargingStatusV2": "CHARGING_STATUS_V2_IDLE"}))
+
+    def test_calculated_power_zero_when_idle(self):
+        self.assertEqual(catalog.charging_power_kw({"chargingStatusV2": "CHARGING_STATUS_V2_IDLE"}), 0.0)
+        self.assertIsNone(catalog.charging_power_kw({}))
+
+
+class TripTrackerTests(unittest.TestCase):
+    T0 = datetime(2025, 11, 10, 8, 0, tzinfo=timezone.utc)
+
+    def run_seq(self, tracker, seq):
+        done = []
+        for minutes, km, cons in seq:
+            done.append(tracker.update(self.T0 + timedelta(minutes=minutes), km, cons))
+        return done
+
+    def test_drive_after_meter_reset(self):
+        t = catalog.TripTracker()
+        done = self.run_seq(t, [
+            (0, 37.4, 15.6), (5, 37.4, 15.6),          # parked, old trip still shown
+            (10, 0.8, 14.0), (15, 6.2, 14.5), (20, 12.0, 15.0),   # new drive, meter reset
+            (25, 12.0, 15.0), (30, 12.0, 15.0), (35, 12.0, 15.0),  # stopped 15 min
+        ])
+        self.assertEqual(done, [False] * 7 + [True])
+        self.assertEqual(t.last["distance_km"], 12.0)
+        self.assertEqual(t.last["energy_kwh"], 1.8)
+        self.assertEqual(t.last["consumption"], 15.0)
+
+    def test_drive_without_reset_uses_differences(self):
+        t = catalog.TripTracker()
+        self.run_seq(t, [(0, 12.0, 15.0), (5, 12.0, 15.0), (10, 16.0, 16.0), (15, 20.0, 16.0),
+                         (20, 20.0, 16.0), (25, 20.0, 16.0), (30, 20.0, 16.0), (35, 20.0, 16.0)])
+        self.assertEqual(t.last["distance_km"], 8.0)
+        self.assertEqual(t.last["energy_kwh"], 1.4)      # 3.2 - 1.8
+        self.assertEqual(t.last["consumption"], 17.5)
+
+    def test_tiny_movement_is_ignored(self):
+        t = catalog.TripTracker()
+        self.run_seq(t, [(0, 5.0, 15.0), (5, 5.2, 15.0), (10, 5.2, 15.0), (30, 5.2, 15.0)])
+        self.assertIsNone(t.last)
+
+    def test_missing_consumption_still_gives_distance(self):
+        t = catalog.TripTracker()
+        self.run_seq(t, [(0, 10.0, None), (5, 14.0, None), (10, 14.0, None), (30, 14.0, None)])
+        self.assertEqual(t.last["distance_km"], 4.0)
+        self.assertIsNone(t.last["consumption"])
+        self.assertIsNone(t.last["energy_kwh"])
+
+    def test_no_reading_is_ignored(self):
+        self.assertFalse(catalog.TripTracker().update(self.T0, None, None))
+
+    def test_restored_last_trip_survives(self):
+        t = catalog.TripTracker({"distance_km": 3.0})
+        self.assertEqual(t.last["distance_km"], 3.0)
 
 
 class WarningTextTests(unittest.TestCase):

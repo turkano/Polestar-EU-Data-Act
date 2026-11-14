@@ -222,6 +222,16 @@ class Spec:
     enabled: bool = True
     icon: str | None = None
     precision: int | None = None
+    # The car only reports this field while charging. When it is missing but the
+    # vehicle is known not to be charging, report 0 instead of "unknown".
+    zero_when_idle: bool = False
+
+    def current(self, data: dict[str, Any] | None) -> Any:
+        """Value to show: the reported one, or 0 when idle for ``zero_when_idle`` fields."""
+        value = self.extract(data)
+        if value is None and self.zero_when_idle and is_charging(data) is False:
+            return 0.0
+        return value
 
     def extract(self, data: dict[str, Any] | None) -> Any:
         """Extract and convert the value from an endpoint payload."""
@@ -294,9 +304,9 @@ SPECS: tuple[Spec, ...] = (
     _s("charger_connection_status", "battery", "chargerConnectionStatus", "Charger connection", "Conexión del cargador", "enum", icon="mdi:ev-plug-type2"),
     _s("charger_power_status", "battery", "chargerPowerStatus", "Charger power status", "Estado de potencia del cargador", "enum"),
     _s("charging_type", "battery", "chargingType", "Charging type", "Tipo de carga", "enum"),
-    _s("charging_power", "battery", "chargingPowerWatts", "Charging power", "Potencia de carga", device_class="power", unit="W", state_class=M),
-    _s("charging_current", "battery", "chargingCurrentAmps", "Charging current", "Corriente de carga", device_class="current", unit="A", state_class=M),
-    _s("charging_voltage", "battery", "chargingVoltageVolts", "Charging voltage", "Tensión de carga", device_class="voltage", unit="V", state_class=M),
+    _s("charging_power", "battery", "chargingPowerWatts", "Charging power", "Potencia de carga", device_class="power", unit="W", state_class=M, zero_when_idle=True),
+    _s("charging_current", "battery", "chargingCurrentAmps", "Charging current", "Corriente de carga", device_class="current", unit="A", state_class=M, zero_when_idle=True),
+    _s("charging_voltage", "battery", "chargingVoltageVolts", "Charging voltage", "Tensión de carga", device_class="voltage", unit="V", state_class=M, zero_when_idle=True),
     _s("time_to_full", "battery", "estimatedChargingTimeToFullMinutes", "Time to full charge", "Tiempo hasta carga completa", device_class="duration", unit="min", state_class=M),
     _s("time_to_target_distance", "battery", "estimatedChargingTimeMinutesToTargetDistance", "Time to target distance", "Tiempo hasta distancia objetivo", device_class="duration", unit="min", state_class=M, enabled=False),
     _s("time_to_minimum_soc", "battery", "estimatedChargingTimeMinutesToMinimumSoc", "Time to minimum charge", "Tiempo hasta carga mínima", device_class="duration", unit="min", state_class=M, enabled=False),
@@ -545,6 +555,30 @@ DERIVED_NAMES = {
         "Puissance de charge (calculée)",
         "Ladeleistung (berechnet)",
     ),
+    "last_trip_distance": (
+        "Last trip distance",
+        "Distancia del último viaje",
+        "Distance du dernier trajet",
+        "Distanz der letzten Fahrt",
+    ),
+    "last_trip_consumption": (
+        "Last trip consumption",
+        "Consumo del último viaje",
+        "Consommation du dernier trajet",
+        "Verbrauch der letzten Fahrt",
+    ),
+    "last_trip_energy": (
+        "Last trip energy used",
+        "Energía del último viaje",
+        "Énergie du dernier trajet",
+        "Energie der letzten Fahrt",
+    ),
+    "last_trip_end": (
+        "Last trip ended",
+        "Fin del último viaje",
+        "Fin du dernier trajet",
+        "Ende der letzten Fahrt",
+    ),
     "odometer_month": (
         "Distance this month",
         "Kilometraje del mes",
@@ -608,7 +642,9 @@ def charging_power_kw(battery: dict[str, Any] | None) -> float | None:
     """Charging power in kW from the reported voltage and current (V x A)."""
     volts = _spec_value("charging_voltage", battery)
     amps = _spec_value("charging_current", battery)
-    if volts is None or amps is None or volts < 0 or amps < 0:
+    if volts is None or amps is None:
+        return 0.0 if is_charging(battery) is False else None
+    if volts < 0 or amps < 0:
         return None
     return round(volts * amps / 1000.0, 2)
 
@@ -657,6 +693,81 @@ class MonthlyTracker:
         return round(odometer_km - self.start, 1)
 
 
+class TripTracker:
+    """Detects finished drives from the automatic trip meter and keeps the last one.
+
+    A drive starts when the automatic trip meter changes and ends when it has not
+    changed for ``IDLE`` (the car stopped uploading movement). Distance is the
+    meter difference; energy is the difference of ``average consumption x
+    distance`` (both reported by the car), so it works whether or not the car
+    reset the meter at the start of the drive. Precision is limited by the
+    polling interval and by the 0.1 kWh/100 km rounding of the reported average.
+    """
+
+    IDLE = timedelta(minutes=15)
+    MIN_KM = 0.5
+
+    def __init__(self, last: dict[str, Any] | None = None) -> None:
+        self.last: dict[str, Any] | None = last
+        self._prev: tuple[datetime, float, float | None] | None = None
+        self._active: dict[str, Any] | None = None
+
+    @staticmethod
+    def _energy(km: float, consumption: float | None) -> float | None:
+        return None if consumption is None else consumption * km / 100.0
+
+    def update(self, now: datetime, trip_km: float | None, consumption: float | None) -> bool:
+        """Register a reading; True when a drive has just been completed."""
+        if trip_km is None:
+            return False
+        sample = (now, trip_km, consumption)
+        prev, self._prev = self._prev, sample
+        if prev is None:
+            return False
+        reset = trip_km < prev[1] - 0.05
+        moved = reset or trip_km > prev[1] + 0.05
+        if moved:
+            if self._active is None:
+                self._active = {
+                    "started": prev[0],
+                    "base_km": 0.0 if reset else prev[1],
+                    "base_energy": 0.0 if reset else self._energy(prev[1], prev[2]),
+                }
+            elif reset:  # the car reset the meter during the drive
+                self._active["base_km"], self._active["base_energy"] = 0.0, 0.0
+            self._active["last_move"] = now
+            self._active["end"] = sample
+            return False
+        if self._active and now - self._active["last_move"] >= self.IDLE:
+            return self._finish()
+        return False
+
+    def _finish(self) -> bool:
+        active, self._active = self._active, None
+        assert active is not None
+        _, km, consumption = active["end"]
+        distance = km - active["base_km"]
+        if distance < self.MIN_KM:
+            return False
+        energy = None
+        end_energy = self._energy(km, consumption)
+        if end_energy is not None and active["base_energy"] is not None:
+            energy = end_energy - active["base_energy"]
+        per_100 = None
+        if energy is not None and energy > 0:
+            per_100 = energy / distance * 100.0
+            if per_100 > 100:  # implausible: rounding noise on a very short drive
+                per_100 = None
+        self.last = {
+            "distance_km": round(distance, 1),
+            "energy_kwh": round(energy, 2) if energy is not None and energy > 0 else None,
+            "consumption": round(per_100, 1) if per_100 is not None else None,
+            "started": active["started"].isoformat(),
+            "ended": active["last_move"].isoformat(),
+        }
+        return True
+
+
 DERIVED_SENSORS = tuple(DERIVED_NAMES)
 
 
@@ -671,4 +782,6 @@ def derived_available(key: str, vehicle_data: dict[str, Any]) -> bool:
         return charging_power_kw(battery) is not None
     if key == "odometer_month":
         return _spec_value("odometer", vehicle_data.get("odometer")) is not None
+    if key.startswith("last_trip_"):
+        return _spec_value("trip_automatic", vehicle_data.get("odometer")) is not None
     return False
