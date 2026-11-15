@@ -44,6 +44,7 @@ from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_ENDPOINTS,
+    CONF_PRICE,
     CONF_SCAN_INTERVAL,
     DOMAIN,
 )
@@ -162,7 +163,11 @@ class PolestarOptionsFlow(OptionsFlow):
                 errors["base"] = "too_many_calls"
             else:
                 return self.async_create_entry(
-                    data={CONF_SCAN_INTERVAL: interval, CONF_ENDPOINTS: endpoints}
+                    data={
+                        CONF_SCAN_INTERVAL: interval,
+                        CONF_ENDPOINTS: endpoints,
+                        CONF_PRICE: max(float(user_input.get(CONF_PRICE) or 0), 0.0),
+                    }
                 )
 
         schema = vol.Schema(
@@ -189,6 +194,12 @@ class PolestarOptionsFlow(OptionsFlow):
                         mode=SelectSelectorMode.DROPDOWN,
                         translation_key="endpoints",
                     )
+                ),
+                vol.Optional(
+                    CONF_PRICE,
+                    default=float((user_input or current).get(CONF_PRICE, 0) or 0),
+                ): NumberSelector(
+                    NumberSelectorConfig(min=0, max=10, step=0.001, mode=NumberSelectorMode.BOX)
                 ),
             }
         )

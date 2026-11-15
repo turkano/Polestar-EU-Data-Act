@@ -26,16 +26,20 @@ from .catalog import (
     SPECS,
     SPECS_BY_KEY,
     VEHICLE_LAST_UPDATE,
+    COST_KEYS,
+    ChargeTracker,
     MonthlyTracker,
+    RangeLearner,
     Spec,
     TripTracker,
+    is_charging,
     charge_end_time,
     charging_power_kw,
     derived_available,
     payload_timestamp,
     range_at_full,
 )
-from .const import DOMAIN
+from .const import CONF_PRICE, DOMAIN
 from .coordinator import PolestarCoordinator
 from .entity import (
     PolestarSpecEntity,
@@ -51,12 +55,14 @@ async def async_setup_entry(
     coordinator: PolestarCoordinator = entry.runtime_data
     known: set[str] = set()
 
-    # One recorder per vehicle watches the trip meter and keeps the last drive.
-    coordinator.trip_recorders = {}  # type: ignore[attr-defined]
+    price = float(entry.options.get(CONF_PRICE, 0) or 0)
+
+    # One recorder per vehicle: last drive, last charge session, learned range.
+    coordinator.recorders = {}  # type: ignore[attr-defined]
     for vin in coordinator.vins:
-        recorder = PolestarTripRecorder(coordinator, vin)
+        recorder = PolestarVehicleRecorder(coordinator, vin)
         await recorder.async_load()
-        coordinator.trip_recorders[vin] = recorder  # type: ignore[attr-defined]
+        coordinator.recorders[vin] = recorder  # type: ignore[attr-defined]
         entry.async_on_unload(coordinator.async_add_listener(recorder.handle_update))
 
     # Account-level diagnostics
@@ -89,11 +95,17 @@ async def async_setup_entry(
                 uid = f"{vin}_{key}"
                 if uid in known or not derived_available(key, data.get(vin, {})):
                     continue
+                if key in COST_KEYS and price <= 0:
+                    continue
                 known.add(uid)
                 if key == "odometer_month":
                     new.append(PolestarMonthlyDistanceSensor(coord, vin))
                 elif key.startswith("last_trip_"):
-                    new.append(PolestarLastTripSensor(coord, vin, key))
+                    new.append(PolestarLastTripSensor(coord, vin, key, price))
+                elif key.startswith("last_charge_"):
+                    new.append(PolestarLastChargeSensor(coord, vin, key, price))
+                elif key == "range_learned":
+                    new.append(PolestarLearnedRangeSensor(coord, vin))
                 else:
                     new.append(PolestarDerivedSensor(coord, vin, key))
         return new
@@ -246,35 +258,85 @@ class PolestarMonthlyDistanceSensor(PolestarVehicleEntity, SensorEntity):
         return attrs
 
 
-class PolestarTripRecorder:
-    """Feeds the automatic trip meter into a TripTracker and persists the last drive."""
+class PolestarVehicleRecorder:
+    """Watches one vehicle: last drive, last charge session and learned range."""
 
     def __init__(self, coordinator: PolestarCoordinator, vin: str) -> None:
         self._coordinator = coordinator
         self._vin = vin
-        self.tracker = TripTracker()
-        self._store = Store(coordinator.hass, 1, f"{DOMAIN}.{vin}.last_trip")
+        self.trip = TripTracker()
+        self.charge = ChargeTracker()
+        self.range = RangeLearner()
+        self._store = Store(coordinator.hass, 1, f"{DOMAIN}.{vin}.recorder")
+        self._legacy = Store(coordinator.hass, 1, f"{DOMAIN}.{vin}.last_trip")
 
     async def async_load(self) -> None:
         stored = await self._store.async_load()
-        if isinstance(stored, dict) and isinstance(stored.get("last"), dict):
-            self.tracker = TripTracker(stored["last"])
+        if not isinstance(stored, dict):
+            stored = {}
+            legacy = await self._legacy.async_load()  # v0.4.x stored only the last trip
+            if isinstance(legacy, dict) and isinstance(legacy.get("last"), dict):
+                stored["trip"] = legacy["last"]
+        if isinstance(stored.get("trip"), dict):
+            self.trip = TripTracker(stored["trip"])
+        if isinstance(stored.get("charge"), dict):
+            self.charge = ChargeTracker(stored["charge"])
+        if isinstance(stored.get("range"), dict):
+            self.range = RangeLearner(stored["range"])
+
+    def _data(self) -> dict[str, Any]:
+        return {"trip": self.trip.last, "charge": self.charge.last, "range": self.range.to_dict()}
 
     @callback
     def handle_update(self) -> None:
         vehicle = (self._coordinator.data or {}).get(self._vin) or {}
-        trip_km = SPECS_BY_KEY["trip_automatic"].extract(vehicle.get("odometer"))
-        consumption = SPECS_BY_KEY["consumption_automatic"].extract(vehicle.get("battery"))
-        if self.tracker.update(dt_util.utcnow(), trip_km, consumption):
-            self._store.async_delay_save(lambda: {"last": self.tracker.last}, 5)
+        battery, odometer = vehicle.get("battery"), vehicle.get("odometer")
+        now = dt_util.utcnow()
+        changed = False
+
+        energy_wh = SPECS_BY_KEY["total_energy_automatic"].extract(battery)
+        breakdown = {
+            cat: v
+            for cat in ("driving", "climate", "battery", "other")
+            if (v := SPECS_BY_KEY[f"energy_automatic_{cat}"].extract(battery)) is not None
+        }
+        changed |= self.trip.update(
+            now,
+            SPECS_BY_KEY["trip_automatic"].extract(odometer),
+            SPECS_BY_KEY["consumption_automatic"].extract(battery),
+            energy_wh,
+            breakdown or None,
+        )
+
+        charging = is_charging(battery)
+        power = charging_power_kw(battery)
+        reported = SPECS_BY_KEY["charging_power"].extract(battery)
+        if reported is not None:
+            power = reported / 1000.0
+        soc = SPECS_BY_KEY["battery_level"].extract(battery)
+        target = SPECS_BY_KEY["target_soc"].extract(vehicle.get("target_soc"))
+        changed |= self.charge.update(now, charging, power, soc, target)
+
+        changed |= self.range.update(SPECS_BY_KEY["odometer"].extract(odometer), soc, charging)
+        if changed:
+            self._store.async_delay_save(self._data, 5)
+
+
+def _currency(coordinator: PolestarCoordinator) -> str | None:
+    return getattr(getattr(coordinator.hass, "config", None), "currency", None)
+
+
+def _recorder(entity: PolestarVehicleEntity) -> PolestarVehicleRecorder | None:
+    return getattr(entity.coordinator, "recorders", {}).get(entity._vin)
 
 
 class PolestarLastTripSensor(PolestarVehicleEntity, SensorEntity):
-    """Distance, consumption, energy or end time of the last completed drive."""
+    """Distance, consumption, energy (total and by category), cost or end time of the last drive."""
 
-    def __init__(self, coordinator: PolestarCoordinator, vin: str, key: str) -> None:
+    def __init__(self, coordinator: PolestarCoordinator, vin: str, key: str, price: float = 0.0) -> None:
         super().__init__(coordinator, vin, key)
         self._key = key
+        self._price = price
         if key == "last_trip_distance":
             self._attr_device_class = SensorDeviceClass.DISTANCE
             self._attr_native_unit_of_measurement = "km"
@@ -286,28 +348,38 @@ class PolestarLastTripSensor(PolestarVehicleEntity, SensorEntity):
             self._attr_state_class = SensorStateClass.MEASUREMENT
             self._attr_suggested_display_precision = 1
             self._attr_icon = "mdi:lightning-bolt"
-        elif key == "last_trip_energy":
+        elif key == "last_trip_energy" or key.startswith("last_trip_energy_"):
             self._attr_device_class = SensorDeviceClass.ENERGY
             self._attr_native_unit_of_measurement = "kWh"
-            self._attr_suggested_display_precision = 1
+            self._attr_suggested_display_precision = 2 if key != "last_trip_energy" else 1
+        elif key == "last_trip_cost":
+            self._attr_device_class = SensorDeviceClass.MONETARY
+            self._attr_native_unit_of_measurement = _currency(coordinator)
+            self._attr_suggested_display_precision = 2
         else:
             self._attr_device_class = SensorDeviceClass.TIMESTAMP
 
     def _last(self) -> dict[str, Any] | None:
-        recorder = getattr(self.coordinator, "trip_recorders", {}).get(self._vin)
-        return recorder.tracker.last if recorder else None
+        recorder = _recorder(self)
+        return recorder.trip.last if recorder else None
 
     @property
     def native_value(self) -> Any:
         last = self._last()
         if not last:
             return None
-        if self._key == "last_trip_distance":
+        key = self._key
+        if key == "last_trip_distance":
             return last.get("distance_km")
-        if self._key == "last_trip_consumption":
+        if key == "last_trip_consumption":
             return last.get("consumption")
-        if self._key == "last_trip_energy":
+        if key == "last_trip_energy":
             return last.get("energy_kwh")
+        if key == "last_trip_cost":
+            energy = last.get("energy_kwh")
+            return round(energy * self._price, 2) if energy is not None else None
+        if key.startswith("last_trip_energy_"):
+            return (last.get("breakdown_kwh") or {}).get(key.removeprefix("last_trip_energy_"))
         return dt_util.parse_datetime(last["ended"]) if last.get("ended") else None
 
     @property
@@ -315,7 +387,110 @@ class PolestarLastTripSensor(PolestarVehicleEntity, SensorEntity):
         last = self._last()
         if not last or self._key == "last_trip_end":
             return None
-        return {"started": last.get("started"), "ended": last.get("ended")}
+        attrs: dict[str, Any] = {"started": last.get("started"), "ended": last.get("ended")}
+        if self._key == "last_trip_energy":
+            attrs["source"] = last.get("energy_source")
+            if last.get("breakdown_kwh"):
+                attrs["breakdown_kwh"] = last["breakdown_kwh"]
+        if self._key == "last_trip_cost":
+            attrs["price_per_kwh"] = self._price
+        return attrs
+
+
+class PolestarLastChargeSensor(PolestarVehicleEntity, SensorEntity):
+    """Energy (estimated), duration, end time or cost of the last charging session."""
+
+    def __init__(self, coordinator: PolestarCoordinator, vin: str, key: str, price: float = 0.0) -> None:
+        super().__init__(coordinator, vin, key)
+        self._key = key
+        self._price = price
+        if key == "last_charge_energy":
+            self._attr_device_class = SensorDeviceClass.ENERGY
+            self._attr_native_unit_of_measurement = "kWh"
+            self._attr_suggested_display_precision = 1
+        elif key == "last_charge_duration":
+            self._attr_device_class = SensorDeviceClass.DURATION
+            self._attr_native_unit_of_measurement = "min"
+            self._attr_icon = "mdi:timer-outline"
+        elif key == "last_charge_cost":
+            self._attr_device_class = SensorDeviceClass.MONETARY
+            self._attr_native_unit_of_measurement = _currency(coordinator)
+            self._attr_suggested_display_precision = 2
+        else:
+            self._attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def _last(self) -> dict[str, Any] | None:
+        recorder = _recorder(self)
+        return recorder.charge.last if recorder else None
+
+    @property
+    def native_value(self) -> Any:
+        last = self._last()
+        if not last:
+            return None
+        key = self._key
+        if key == "last_charge_energy":
+            return last.get("energy_kwh")
+        if key == "last_charge_duration":
+            return last.get("duration_min")
+        if key == "last_charge_cost":
+            energy = last.get("energy_kwh")
+            return round(energy * self._price, 2) if energy is not None else None
+        return dt_util.parse_datetime(last["ended"]) if last.get("ended") else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        last = self._last()
+        if not last or self._key == "last_charge_end":
+            return None
+        attrs: dict[str, Any] = {
+            "started": last.get("started"),
+            "ended": last.get("ended"),
+            "battery_start": last.get("soc_start"),
+            "battery_end": last.get("soc_end"),
+            "target": last.get("target"),
+        }
+        if self._key in ("last_charge_energy", "last_charge_cost"):
+            attrs["note"] = "Integral of the reported charging power; energy stored in the battery, not drawn from the wall."
+        if self._key == "last_charge_cost":
+            attrs["price_per_kwh"] = self._price
+        return attrs
+
+
+class PolestarLearnedRangeSensor(PolestarVehicleEntity, SensorEntity):
+    """Range from the real km per 1 % learned while driving."""
+
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = "km"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+    _attr_icon = "mdi:map-marker-distance"
+
+    def __init__(self, coordinator: PolestarCoordinator, vin: str) -> None:
+        super().__init__(coordinator, vin, "range_learned")
+
+    @property
+    def native_value(self) -> float | None:
+        recorder = _recorder(self)
+        battery = self._payload("battery")
+        if recorder is None:
+            return None
+        return recorder.range.estimate(
+            SPECS_BY_KEY["battery_level"].extract(battery), SPECS_BY_KEY["range"].extract(battery)
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        recorder = _recorder(self)
+        if recorder is None:
+            return None
+        learner = recorder.range
+        return {
+            "km_per_percent": round(learner.km_per_pct, 2) if learner.km_per_pct else None,
+            "samples": learner.samples,
+            "car_range_km": SPECS_BY_KEY["range"].extract(self._payload("battery")),
+            "note": "Until a few drives are recorded this shows the car's own estimate.",
+        }
 
 
 class PolestarLastUpdateSensor(PolestarVehicleEntity, SensorEntity):

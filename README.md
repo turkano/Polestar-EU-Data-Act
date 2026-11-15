@@ -4,7 +4,7 @@
 
 A Home Assistant custom integration that reads your vehicle data from the **official Polestar Data Portal API** (`data-portal.polestar.com`), the access Polestar provides to vehicle owners under the EU Data Act.
 
-> **Status: beta (v0.4.0).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
+> **Status: beta (v0.5.0).** Written from the portal's API documentation, covered by offline unit tests, and confirmed working on one live account (first successful install). Other models and markets may report different fields: please report what you see.
 
 - Read-only: no commands, no charging control.
 - Uses the official OAuth2 client-credentials API (no scraping, no Polestar ID password stored).
@@ -72,7 +72,11 @@ Besides the raw fields, the integration creates a few sensors computed from them
 |---|---|
 | **Estimated range at 100 %** | Current range × 100 / battery %. A linear extrapolation, so it is only an estimate; it is not shown below 5 % battery. |
 | **Charging power (calculated)** | Charging voltage × charging current, in kW. Exact for DC and single-phase charging; for three-phase AC it can read lower than the real power, depending on whether the car reports phase or line voltage. The attributes `voltage_v`, `current_a` and `reported_power_w` let you compare. |
-| **Last trip: distance, consumption, energy used, end time** | A drive starts when the *automatic trip meter* changes and ends after 15 minutes without change. Distance is the meter difference; energy is the difference of *average consumption × distance* (both reported by the car), so it works whether or not the car reset the meter. The result is stored and survives restarts. Precision is limited by the polling interval and by the 0.1 kWh/100 km rounding of the reported average, so very short drives (< 0.5 km) are ignored and short ones are approximate. Needs the *Odometer and trips* and *Battery and charging* data (both on by default). |
+| **Last trip: distance, consumption, energy used, end time, energy by category (driving / climate / battery / other), cost** | A drive starts when the *automatic trip meter* changes and ends after 15 minutes without change. Distance is the meter difference. Energy and its split into driving / climate / battery / other come from the car's cumulative automatic-trip energy counters (Wh); if the car does not report them, energy falls back to *average consumption × distance*. The result is stored and survives restarts. Very short drives (< 0.5 km) are ignored and short ones are approximate. |
+| **Last charge: energy (estimated), duration, end time, cost** | The API has no "energy added" value, so the energy is the integral of the reported charging power between polls (energy stored in the battery, not drawn from the wall). A shorter polling interval gives a better estimate. Sessions are kept across restarts. |
+| **Last charge ended below target** (binary sensor) | On when the last session ended with a battery level below the charge target. Informational: it is also on if you unplugged early. Use it in an automation to get a notification about slow or interrupted charges. |
+| **Estimated range (learned)** | Learns the real km per 1 % of battery from your driving (odometer and battery level, exponential average) so cold weather, tyres and battery ageing are reflected. Until a few drives are recorded it shows the car's own estimate. Attributes: `km_per_percent`, `samples`. |
+| **Cost sensors** | Set *Electricity price per kWh* in the integration options (⚙ Configure) to get *Last trip cost* and *Last charge cost* in your Home Assistant currency. 0 disables them. |
 | **Charge end time** | Time reported by the car + "time to full charge". Only while charging (charging power > 0); *unknown* otherwise. It is a timestamp, so dashboards can show it as a date/time or "in 40 minutes". |
 | **Distance this month** | Odometer now minus the odometer at the start of the month. The value is stored, so it survives restarts and resets itself on the 1st. The first month only counts from the moment the integration first saw the odometer; the previous month's total is kept in the `previous_month_km` attribute. |
 

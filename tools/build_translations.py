@@ -60,6 +60,7 @@ _TEXT = {
         "opt_desc": "The portal allows 10,000 API calls per day. Each enabled endpoint costs one call per vehicle and poll. You have {vehicles} vehicle(s); the integration keeps the estimate under {limit} calls per day.",
         "opt_interval": "Polling interval (minutes)",
         "opt_endpoints": "Data to fetch",
+        "opt_price": "Electricity price per kWh (0 = no cost sensors)",
         "no_endpoints": "Select at least one kind of data.",
         "too_many_calls": "This would exceed the daily API limit. Increase the interval or disable some data.",
     },
@@ -79,6 +80,7 @@ _TEXT = {
         "opt_desc": "El portal permite 10.000 llamadas a la API al día. Cada tipo de dato activado cuesta una llamada por vehículo y sondeo. Tienes {vehicles} vehículo(s); la integración mantiene la estimación por debajo de {limit} llamadas al día.",
         "opt_interval": "Intervalo de sondeo (minutos)",
         "opt_endpoints": "Datos a consultar",
+        "opt_price": "Precio de la electricidad por kWh (0 = sin sensores de coste)",
         "no_endpoints": "Selecciona al menos un tipo de dato.",
         "too_many_calls": "Esto superaría el límite diario de la API. Aumenta el intervalo o desactiva algunos datos.",
     },
@@ -98,6 +100,7 @@ _TEXT = {
         "opt_desc": "Le portail autorise 10 000 appels d'API par jour. Chaque type de données activé coûte un appel par véhicule et par interrogation. Vous avez {vehicles} véhicule(s) ; l'intégration maintient l'estimation sous {limit} appels par jour.",
         "opt_interval": "Intervalle d'interrogation (minutes)",
         "opt_endpoints": "Données à récupérer",
+        "opt_price": "Prix de l'électricité par kWh (0 = pas de capteurs de coût)",
         "no_endpoints": "Sélectionnez au moins un type de données.",
         "too_many_calls": "Cela dépasserait la limite quotidienne de l'API. Augmentez l'intervalle ou désactivez certaines données.",
     },
@@ -117,6 +120,7 @@ _TEXT = {
         "opt_desc": "Das Portal erlaubt 10.000 API-Aufrufe pro Tag. Jede aktivierte Datenart kostet einen Aufruf pro Fahrzeug und Abfrage. Du hast {vehicles} Fahrzeug(e); die Integration hält die Schätzung unter {limit} Aufrufen pro Tag.",
         "opt_interval": "Abfrageintervall (Minuten)",
         "opt_endpoints": "Abzurufende Daten",
+        "opt_price": "Strompreis pro kWh (0 = keine Kostensensoren)",
         "no_endpoints": "Wähle mindestens eine Datenart aus.",
         "too_many_calls": "Das würde das tägliche API-Limit überschreiten. Erhöhe das Intervall oder deaktiviere einige Daten.",
     },
@@ -170,6 +174,7 @@ SPEC_NAMES = {  # key: (fr, de)
     "consumption_average": ("Consommation moyenne", "Durchschnittsverbrauch"),
     "consumption_since_charge": ("Consommation depuis la dernière charge", "Verbrauch seit der letzten Ladung"),
     "consumption_automatic": ("Consommation (trajet automatique)", "Verbrauch (automatische Fahrt)"),
+    "total_energy_automatic": ("Énergie totale (trajet automatique)", "Gesamtenergie (automatische Fahrt)"),
     "total_energy_consumption": ("Consommation d'énergie totale", "Gesamtenergieverbrauch"),
     "preconditioning_status": ("Préconditionnement", "Vorkonditionierung"),
     "central_lock": ("Verrouillage centralisé", "Zentralverriegelung"),
@@ -284,7 +289,7 @@ def build(lang: str) -> dict:
                 "init": {
                     "title": t["opt_title"],
                     "description": t["opt_desc"],
-                    "data": {"scan_interval": t["opt_interval"], "endpoints": t["opt_endpoints"]},
+                    "data": {"scan_interval": t["opt_interval"], "endpoints": t["opt_endpoints"], "electricity_price": t["opt_price"]},
                 }
             },
             "error": {"no_endpoints": t["no_endpoints"], "too_many_calls": t["too_many_calls"]},
@@ -311,6 +316,8 @@ def build(lang: str) -> dict:
         out["entity"]["sensor"][key] = {"name": names[li]}
     for key, names in catalog.IMAGE_NAMES.items():
         out["entity"]["image"][key] = {"name": names[li]}
+    for key, names in catalog.DERIVED_BINARY_NAMES.items():
+        out["entity"]["binary_sensor"][key] = {"name": names[li]}
     key, en, es = catalog.VEHICLE_LAST_UPDATE
     out["entity"]["sensor"][key] = {"name": en if lang == "en" else es if lang == "es" else LAST_UPDATE[idx]}
     tracker = catalog.TRACKER_NAME

@@ -8,6 +8,7 @@ CONF_ACCOUNT_ID = "account_id"
 
 CONF_SCAN_INTERVAL = "scan_interval"  # minutes
 CONF_ENDPOINTS = "endpoints"
+CONF_PRICE = "electricity_price"  # per kWh, 0 disables the cost sensors
 
 # How long to skip an endpoint after a 404/403 for a given VIN (seconds).
 UNAVAILABLE_RETRY_SECONDS = 6 * 3600

@@ -295,6 +295,92 @@ class TripTrackerTests(unittest.TestCase):
         self.assertEqual(t.last["distance_km"], 3.0)
 
 
+class TripEnergyBreakdownTests(unittest.TestCase):
+    T0 = datetime(2025, 11, 10, 8, 0, tzinfo=timezone.utc)
+
+    def test_reported_energy_and_breakdown(self):
+        t = catalog.TripTracker()
+        bd0 = {"driving": 1000, "climate": 100, "battery": 0, "other": 0}
+        bd1 = {"driving": 2500, "climate": 500, "battery": 50, "other": 50}
+        seq = [(0, 10.0, 15.0, 5000, bd0), (5, 10.0, 15.0, 5000, bd0), (10, 20.0, 18.0, 5000 + 3000, bd1)]
+        for m, km, c, wh, bd in seq:
+            t.update(self.T0 + timedelta(minutes=m), km, c, wh, bd)
+        done = [t.update(self.T0 + timedelta(minutes=m), 20.0, 18.0, 8000, bd1) for m in (15, 20, 25, 30, 35)]
+        self.assertTrue(any(done))
+        self.assertEqual(t.last["energy_kwh"], 3.0)
+        self.assertEqual(t.last["energy_source"], "reported")
+        self.assertEqual(t.last["consumption"], 30.0)
+        self.assertEqual(t.last["breakdown_kwh"], {"driving": 1.5, "climate": 0.4, "battery": 0.05, "other": 0.05})
+
+    def test_falls_back_to_estimate(self):
+        t = catalog.TripTracker()
+        for m, km in ((0, 5.0), (5, 5.0), (10, 15.0), (30, 15.0)):
+            t.update(self.T0 + timedelta(minutes=m), km, 16.0)
+        self.assertEqual(t.last["energy_source"], "estimated")
+        self.assertIsNone(t.last["breakdown_kwh"])
+
+
+class ChargeTrackerTests(unittest.TestCase):
+    T0 = datetime(2025, 11, 10, 20, 0, tzinfo=timezone.utc)
+
+    def feed(self, t, seq):
+        out = []
+        for m, charging, kw, soc, target in seq:
+            out.append(t.update(self.T0 + timedelta(minutes=m), charging, kw, soc, target))
+        return out
+
+    def test_session_energy_and_target(self):
+        t = catalog.ChargeTracker()
+        done = self.feed(t, [(0, False, 0, 20, 90), (5, True, 7.0, 20, 90), (35, True, 7.0, 25, 90),
+                             (65, True, 7.0, 30, 90), (70, False, 0, 30, 90)])
+        self.assertEqual(done, [False, False, False, False, True])
+        self.assertEqual(t.last["energy_kwh"], 7.0)   # 7 kW for 60 min
+        self.assertEqual(t.last["duration_min"], 60)
+        self.assertEqual((t.last["soc_start"], t.last["soc_end"]), (20, 30))
+        self.assertTrue(t.last["below_target"])
+
+    def test_reached_target(self):
+        t = catalog.ChargeTracker()
+        self.feed(t, [(0, True, 5.0, 80, 80), (30, True, 5.0, 80, 80), (35, False, 0, 80, 80)])
+        self.assertFalse(t.last["below_target"])
+
+    def test_unknown_state_does_not_end_session(self):
+        t = catalog.ChargeTracker()
+        self.feed(t, [(0, True, 5.0, 50, 80), (10, None, None, None, None), (20, True, 5.0, 55, 80)])
+        self.assertTrue(t.active)
+
+    def test_very_short_session_ignored(self):
+        t = catalog.ChargeTracker()
+        self.feed(t, [(0, True, 5.0, 50, 80), (1, False, 0, 50, 80)])
+        self.assertIsNone(t.last)
+
+
+class RangeLearnerTests(unittest.TestCase):
+    def test_learns_km_per_percent(self):
+        r = catalog.RangeLearner()
+        r.update(1000, 80, False)
+        self.assertFalse(r.update(1010, 78, False))          # drop too small
+        self.assertTrue(r.update(1020, 70, False))           # 20 km / 10 % = 2.0? base was 80
+        self.assertAlmostEqual(r.km_per_pct, 2.0)
+        self.assertEqual(r.estimate(50, 300), 100)
+
+    def test_charging_resets_window_and_fallback(self):
+        r = catalog.RangeLearner()
+        r.update(1000, 50, False)
+        r.update(1000, 60, True)
+        self.assertEqual(r.estimate(40, 250), 250)           # nothing learned yet: car's value
+        self.assertTrue(r.update(1030, 56, False))           # window restarted at 60 %: 30 km / 4 %
+        self.assertAlmostEqual(r.km_per_pct, 7.5)
+
+    def test_implausible_sample_is_ignored_and_persists(self):
+        r = catalog.RangeLearner()
+        r.update(1000, 90, False)
+        self.assertFalse(r.update(1006, 80, False))          # 0.6 km/% is nonsense
+        self.assertIsNone(r.km_per_pct)
+        r.km_per_pct, r.samples = 5.0, 3
+        self.assertEqual(catalog.RangeLearner(r.to_dict()).km_per_pct, 5.0)
+
+
 class WarningTextTests(unittest.TestCase):
     def test_humanize(self):
         self.assertEqual(catalog.humanize_warning("LOW_VOLTAGE_BATTERY_WARNING_NO_WARNING"), "No warning")

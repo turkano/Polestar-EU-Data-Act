@@ -9,9 +9,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .catalog import SPECS, Spec
+from .catalog import SPECS, Spec, derived_available
 from .coordinator import PolestarCoordinator
-from .entity import PolestarSpecEntity, async_setup_discovery
+from .entity import PolestarSpecEntity, PolestarVehicleEntity, async_setup_discovery
 
 _RAW_KINDS = {"opening", "unlocked"}
 
@@ -40,9 +40,46 @@ async def async_setup_entry(
                 if spec.raw(payload) is not None:
                     known.add(uid)
                     new.append(PolestarBinarySensor(coord, vin, spec))
+            uid = f"{vin}_charge_below_target"
+            if uid not in known and derived_available("charge_below_target", data.get(vin, {})):
+                known.add(uid)
+                new.append(PolestarChargeBelowTargetSensor(coord, vin))
         return new
 
     entry.async_on_unload(async_setup_discovery(coordinator, async_add_entities, factory))
+
+
+class PolestarChargeBelowTargetSensor(PolestarVehicleEntity, BinarySensorEntity):
+    """On when the last charging session ended below the charge target.
+
+    Informational: it is also on when you simply unplugged early.
+    """
+
+    _attr_icon = "mdi:battery-alert-variant-outline"
+
+    def __init__(self, coordinator: PolestarCoordinator, vin: str) -> None:
+        super().__init__(coordinator, vin, "charge_below_target")
+
+    def _last(self) -> dict[str, Any] | None:
+        recorder = getattr(self.coordinator, "recorders", {}).get(self._vin)
+        return recorder.charge.last if recorder else None
+
+    @property
+    def is_on(self) -> bool | None:
+        last = self._last()
+        return bool(last["below_target"]) if last else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        last = self._last()
+        if not last:
+            return None
+        return {
+            "battery_end": last.get("soc_end"),
+            "target": last.get("target"),
+            "ended": last.get("ended"),
+            "note": "Also on when the charge was stopped manually before reaching the target.",
+        }
 
 
 class PolestarBinarySensor(PolestarSpecEntity, BinarySensorEntity):

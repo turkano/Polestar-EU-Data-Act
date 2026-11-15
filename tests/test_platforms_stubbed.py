@@ -173,11 +173,12 @@ class PlatformSmokeTests(unittest.TestCase):
         coord.async_add_listener = lambda cb: (lambda: None)
         return coord
 
-    def _setup_platform(self, module_name, mutate=None):
+    def _setup_platform(self, module_name, mutate=None, options=None):
         coord = self._fake_coordinator(mutate)
         added = []
         entry = types.SimpleNamespace(
-            runtime_data=coord, entry_id="entry1", async_on_unload=lambda f: None
+            runtime_data=coord, entry_id="entry1", async_on_unload=lambda f: None,
+            options=options or {},
         )
         asyncio.run(self.mods[module_name].async_setup_entry(None, entry, added.extend))
         for ent in added:
@@ -232,13 +233,59 @@ class PlatformSmokeTests(unittest.TestCase):
         for key in ("distance", "consumption", "energy", "end"):
             self.assertIn(f"YSM123456_last_trip_{key}", by_uid)
         self.assertIsNone(by_uid["YSM123456_last_trip_distance"].native_value)  # nothing recorded yet
-        coord.trip_recorders["YSM123456"].tracker.last = {
+        coord.recorders["YSM123456"].trip.last = {
             "distance_km": 12.0, "energy_kwh": 1.8, "consumption": 15.0,
             "started": "2025-11-10T08:00:00+00:00", "ended": "2025-11-10T08:20:00+00:00",
         }
         self.assertEqual(by_uid["YSM123456_last_trip_distance"].native_value, 12.0)
         self.assertEqual(by_uid["YSM123456_last_trip_consumption"].native_value, 15.0)
         self.assertEqual(by_uid["YSM123456_last_trip_energy"].native_value, 1.8)
+
+    def test_trip_breakdown_charge_range_and_cost(self):
+        def with_trip(vehicle):
+            vehicle["odometer"]["tripMeterAutomaticKm"] = 12.0
+
+        coord, added = self._setup_platform("sensor", with_trip, {"electricity_price": 0.2})
+        by_uid = {e._attr_unique_id: e for e in added}
+        for key in ("last_trip_energy_driving", "last_trip_energy_climate", "last_trip_energy_battery",
+                    "last_trip_energy_other", "last_trip_cost", "last_charge_energy", "last_charge_duration",
+                    "last_charge_end", "last_charge_cost", "range_learned"):
+            self.assertIn(f"YSM123456_{key}", by_uid, key)
+        rec = coord.recorders["YSM123456"]
+        rec.trip.last = {"distance_km": 10.0, "energy_kwh": 2.0, "consumption": 20.0,
+                         "breakdown_kwh": {"driving": 1.5, "climate": 0.4, "battery": 0.05, "other": 0.05},
+                         "energy_source": "reported", "started": "2025-11-10T08:00:00+00:00",
+                         "ended": "2025-11-10T08:20:00+00:00"}
+        rec.charge.last = {"energy_kwh": 30.0, "duration_min": 95, "started": "2025-11-10T20:00:00+00:00",
+                           "ended": "2025-11-10T21:35:00+00:00", "soc_start": 20, "soc_end": 80,
+                           "target": 90, "below_target": True}
+        self.assertEqual(by_uid["YSM123456_last_trip_energy_climate"].native_value, 0.4)
+        self.assertEqual(by_uid["YSM123456_last_trip_cost"].native_value, 0.4)
+        self.assertEqual(by_uid["YSM123456_last_charge_energy"].native_value, 30.0)
+        self.assertEqual(by_uid["YSM123456_last_charge_duration"].native_value, 95)
+        self.assertEqual(by_uid["YSM123456_last_charge_cost"].native_value, 6.0)
+        # no learned data yet: falls back to the car's range
+        self.assertEqual(by_uid["YSM123456_range_learned"].native_value, 320)
+        rec.range.km_per_pct = 4.0
+        self.assertEqual(by_uid["YSM123456_range_learned"].native_value, 256)
+
+    def test_cost_sensors_need_a_price(self):
+        def with_trip(vehicle):
+            vehicle["odometer"]["tripMeterAutomaticKm"] = 12.0
+
+        _, added = self._setup_platform("sensor", with_trip)
+        uids = {e._attr_unique_id for e in added}
+        self.assertNotIn("YSM123456_last_trip_cost", uids)
+        self.assertNotIn("YSM123456_last_charge_cost", uids)
+
+    def test_charge_below_target_binary_sensor(self):
+        coord, added = self._setup_platform("binary_sensor")
+        by_uid = {e._attr_unique_id: e for e in added}
+        sensor = by_uid["YSM123456_charge_below_target"]
+        self.assertIsNone(sensor.is_on)
+        sensor.coordinator = coord
+        coord.recorders = {"YSM123456": types.SimpleNamespace(charge=types.SimpleNamespace(last={"below_target": True, "soc_end": 70, "target": 90}))}
+        self.assertTrue(sensor.is_on)
 
     def test_derived_sensors(self):
         _, added = self._setup_platform("sensor")
@@ -293,7 +340,7 @@ class PlatformSmokeTests(unittest.TestCase):
     def test_discovery_is_not_duplicated(self):
         coord = self._fake_coordinator()
         added = []
-        entry = types.SimpleNamespace(runtime_data=coord, entry_id="e", async_on_unload=lambda f: None)
+        entry = types.SimpleNamespace(runtime_data=coord, entry_id="e", async_on_unload=lambda f: None, options={})
         captured = {}
         coord.async_add_listener = lambda cb: captured.setdefault("cb", cb) and (lambda: None)
         asyncio.run(self.mods["sensor"].async_setup_entry(None, entry, added.extend))

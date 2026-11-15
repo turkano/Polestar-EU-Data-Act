@@ -314,6 +314,7 @@ SPECS: tuple[Spec, ...] = (
     _s("consumption_since_charge", "battery", "averageEnergyConsumptionKwhPer100KmSinceCharge", "Consumption since charge", "Consumo desde la última carga", unit="kWh/100km", state_class=M, precision=1, icon="mdi:lightning-bolt"),
     _s("consumption_automatic", "battery", "averageEnergyConsumptionKwhPer100KmAutomatic", "Consumption (automatic trip)", "Consumo (viaje automático)", unit="kWh/100km", state_class=M, precision=1, enabled=False, icon="mdi:lightning-bolt"),
     _s("total_energy_consumption", "battery", "totalEnergyConsumptionWh", "Total energy consumption", "Consumo total de energía", device_class="energy", unit="Wh", enabled=False),
+    _s("total_energy_automatic", "battery", "totalEnergyConsumptionWhAutomatic", "Total energy (automatic trip)", "Energía total (viaje automático)", device_class="energy", unit="Wh", enabled=False),
     _s("preconditioning_status", "battery", "manualPreconditioning.preconditioningStatus", "Preconditioning", "Preacondicionamiento", "enum", icon="mdi:air-conditioner"),
     # ---- exterior --------------------------------------------------------
     _s("central_lock", "exterior", "centralLock", "Central lock", "Cierre centralizado", "unlocked", "binary_sensor", device_class="lock"),
@@ -579,11 +580,79 @@ DERIVED_NAMES = {
         "Fin du dernier trajet",
         "Ende der letzten Fahrt",
     ),
+    "last_trip_energy_driving": (
+        "Last trip energy: driving",
+        "Energía del último viaje: conducción",
+        "Énergie du dernier trajet : conduite",
+        "Energie der letzten Fahrt: Fahren",
+    ),
+    "last_trip_energy_climate": (
+        "Last trip energy: climate",
+        "Energía del último viaje: climatización",
+        "Énergie du dernier trajet : climatisation",
+        "Energie der letzten Fahrt: Klima",
+    ),
+    "last_trip_energy_battery": (
+        "Last trip energy: battery",
+        "Energía del último viaje: batería",
+        "Énergie du dernier trajet : batterie",
+        "Energie der letzten Fahrt: Batterie",
+    ),
+    "last_trip_energy_other": (
+        "Last trip energy: other",
+        "Energía del último viaje: otros",
+        "Énergie du dernier trajet : autres",
+        "Energie der letzten Fahrt: Sonstiges",
+    ),
+    "last_trip_cost": (
+        "Last trip cost",
+        "Coste del último viaje",
+        "Coût du dernier trajet",
+        "Kosten der letzten Fahrt",
+    ),
+    "last_charge_energy": (
+        "Last charge energy (estimated)",
+        "Energía de la última carga (estimada)",
+        "Énergie de la dernière charge (estimée)",
+        "Energie der letzten Ladung (geschätzt)",
+    ),
+    "last_charge_duration": (
+        "Last charge duration",
+        "Duración de la última carga",
+        "Durée de la dernière charge",
+        "Dauer der letzten Ladung",
+    ),
+    "last_charge_end": (
+        "Last charge ended",
+        "Fin de la última carga",
+        "Fin de la dernière charge",
+        "Ende der letzten Ladung",
+    ),
+    "last_charge_cost": (
+        "Last charge cost (estimated)",
+        "Coste de la última carga (estimado)",
+        "Coût de la dernière charge (estimé)",
+        "Kosten der letzten Ladung (geschätzt)",
+    ),
+    "range_learned": (
+        "Estimated range (learned)",
+        "Autonomía estimada (aprendida)",
+        "Autonomie estimée (apprise)",
+        "Geschätzte Reichweite (gelernt)",
+    ),
     "odometer_month": (
         "Distance this month",
         "Kilometraje del mes",
         "Distance ce mois-ci",
         "Strecke diesen Monat",
+    ),
+}
+DERIVED_BINARY_NAMES = {  # key: (en, es, fr, de)
+    "charge_below_target": (
+        "Last charge ended below target",
+        "Última carga terminada por debajo del objetivo",
+        "Dernière charge terminée sous l'objectif",
+        "Letzte Ladung unter dem Ziel beendet",
     ),
 }
 IMAGE_NAMES = {  # key: (en, es, fr, de)
@@ -693,15 +762,18 @@ class MonthlyTracker:
         return round(odometer_km - self.start, 1)
 
 
+_BREAKDOWN_KEYS = ("driving", "climate", "battery", "other")
+
+
 class TripTracker:
     """Detects finished drives from the automatic trip meter and keeps the last one.
 
     A drive starts when the automatic trip meter changes and ends when it has not
     changed for ``IDLE`` (the car stopped uploading movement). Distance is the
-    meter difference; energy is the difference of ``average consumption x
-    distance`` (both reported by the car), so it works whether or not the car
-    reset the meter at the start of the drive. Precision is limited by the
-    polling interval and by the 0.1 kWh/100 km rounding of the reported average.
+    meter difference. Energy comes from the car's cumulative automatic-trip
+    energy counters (Wh, split in driving / climate / battery / other) when it
+    reports them, otherwise from ``average consumption x distance``. Precision is
+    limited by the polling interval.
     """
 
     IDLE = timedelta(minutes=15)
@@ -709,32 +781,49 @@ class TripTracker:
 
     def __init__(self, last: dict[str, Any] | None = None) -> None:
         self.last: dict[str, Any] | None = last
-        self._prev: tuple[datetime, float, float | None] | None = None
+        self._prev: dict[str, Any] | None = None
         self._active: dict[str, Any] | None = None
 
     @staticmethod
-    def _energy(km: float, consumption: float | None) -> float | None:
+    def _cons_energy(km: float, consumption: float | None) -> float | None:
         return None if consumption is None else consumption * km / 100.0
 
-    def update(self, now: datetime, trip_km: float | None, consumption: float | None) -> bool:
+    @staticmethod
+    def _base(sample: dict[str, Any] | None) -> dict[str, Any]:
+        """Counters at the start of a drive (zeros when the meter was reset)."""
+        if sample is None:
+            return {"km": 0.0, "cons": 0.0, "wh": 0.0, "bd": {k: 0.0 for k in _BREAKDOWN_KEYS}}
+        return {
+            "km": sample["km"],
+            "cons": TripTracker._cons_energy(sample["km"], sample["cons"]),
+            "wh": sample["wh"],
+            "bd": dict(sample["bd"]) if sample["bd"] else None,
+        }
+
+    def update(
+        self,
+        now: datetime,
+        trip_km: float | None,
+        consumption: float | None,
+        energy_wh: float | None = None,
+        breakdown: dict[str, float] | None = None,
+    ) -> bool:
         """Register a reading; True when a drive has just been completed."""
         if trip_km is None:
             return False
-        sample = (now, trip_km, consumption)
+        sample = {"t": now, "km": trip_km, "cons": consumption, "wh": energy_wh, "bd": breakdown}
         prev, self._prev = self._prev, sample
         if prev is None:
             return False
-        reset = trip_km < prev[1] - 0.05
-        moved = reset or trip_km > prev[1] + 0.05
+        reset = trip_km < prev["km"] - 0.05 or (
+            energy_wh is not None and prev["wh"] is not None and energy_wh < prev["wh"] - 1
+        )
+        moved = reset or trip_km > prev["km"] + 0.05
         if moved:
             if self._active is None:
-                self._active = {
-                    "started": prev[0],
-                    "base_km": 0.0 if reset else prev[1],
-                    "base_energy": 0.0 if reset else self._energy(prev[1], prev[2]),
-                }
-            elif reset:  # the car reset the meter during the drive
-                self._active["base_km"], self._active["base_energy"] = 0.0, 0.0
+                self._active = {"started": prev["t"], "base": self._base(None if reset else prev)}
+            elif reset:  # the car reset the counters during the drive
+                self._active["base"] = self._base(None)
             self._active["last_move"] = now
             self._active["end"] = sample
             return False
@@ -745,27 +834,162 @@ class TripTracker:
     def _finish(self) -> bool:
         active, self._active = self._active, None
         assert active is not None
-        _, km, consumption = active["end"]
-        distance = km - active["base_km"]
+        end, base = active["end"], active["base"]
+        distance = end["km"] - base["km"]
         if distance < self.MIN_KM:
             return False
-        energy = None
-        end_energy = self._energy(km, consumption)
-        if end_energy is not None and active["base_energy"] is not None:
-            energy = end_energy - active["base_energy"]
+        energy: float | None = None
+        breakdown: dict[str, float] | None = None
+        source = None
+        if end["wh"] is not None and base["wh"] is not None and end["wh"] - base["wh"] > 0:
+            energy, source = (end["wh"] - base["wh"]) / 1000.0, "reported"
+            if end["bd"] and base["bd"]:
+                parts = {
+                    k: round(max(end["bd"].get(k, 0) - base["bd"].get(k, 0), 0) / 1000.0, 2)
+                    for k in _BREAKDOWN_KEYS
+                    if k in end["bd"]
+                }
+                breakdown = parts or None
+        else:
+            end_energy = self._cons_energy(end["km"], end["cons"])
+            if end_energy is not None and base["cons"] is not None and end_energy - base["cons"] > 0:
+                energy, source = end_energy - base["cons"], "estimated"
         per_100 = None
-        if energy is not None and energy > 0:
+        if energy is not None:
             per_100 = energy / distance * 100.0
             if per_100 > 100:  # implausible: rounding noise on a very short drive
-                per_100 = None
+                per_100, energy, breakdown, source = None, None, None, None
         self.last = {
             "distance_km": round(distance, 1),
-            "energy_kwh": round(energy, 2) if energy is not None and energy > 0 else None,
+            "energy_kwh": round(energy, 2) if energy is not None else None,
             "consumption": round(per_100, 1) if per_100 is not None else None,
+            "breakdown_kwh": breakdown,
+            "energy_source": source,
             "started": active["started"].isoformat(),
             "ended": active["last_move"].isoformat(),
         }
         return True
+
+
+class ChargeTracker:
+    """Follows a charging session: integrates the reported power into energy.
+
+    The API has no "energy added" field, so the energy is the integral of the
+    charging power between polls (approximate, depends on the polling interval).
+    """
+
+    MAX_GAP = timedelta(hours=1)  # do not integrate over long data gaps
+    MIN_DURATION = timedelta(minutes=2)
+    TOLERANCE = 1.0  # percentage points below the target still counted as reached
+
+    def __init__(self, last: dict[str, Any] | None = None) -> None:
+        self.last: dict[str, Any] | None = last
+        self._active: dict[str, Any] | None = None
+        self._prev: tuple[datetime, float | None] | None = None
+
+    @property
+    def active(self) -> bool:
+        return self._active is not None
+
+    def update(
+        self,
+        now: datetime,
+        charging: bool | None,
+        power_kw: float | None,
+        soc: float | None,
+        target: float | None,
+    ) -> bool:
+        """Register a reading; True when a session has just ended."""
+        if charging is None:
+            return False
+        if charging:
+            if self._active is None:
+                self._active = {"started": now, "soc_start": soc, "energy": 0.0, "soc": soc, "target": target}
+            elif self._prev and now - self._prev[0] <= self.MAX_GAP:
+                p0 = self._prev[1] if self._prev[1] is not None else power_kw
+                p1 = power_kw if power_kw is not None else p0
+                if p0 is not None and p1 is not None:
+                    hours = (now - self._prev[0]).total_seconds() / 3600.0
+                    self._active["energy"] += (max(p0, 0) + max(p1, 0)) / 2.0 * hours
+            if soc is not None:
+                self._active["soc"] = soc
+            if target is not None:
+                self._active["target"] = target
+            self._prev = (now, power_kw)
+            self._active["last"] = now
+            return False
+        self._prev = None
+        if self._active is None:
+            return False
+        active, self._active = self._active, None
+        end = active["last"]
+        duration = end - active["started"]
+        if duration < self.MIN_DURATION:
+            return False
+        soc_end, tgt = active["soc"], active["target"]
+        self.last = {
+            "energy_kwh": round(active["energy"], 2),
+            "duration_min": round(duration.total_seconds() / 60.0),
+            "started": active["started"].isoformat(),
+            "ended": end.isoformat(),
+            "soc_start": active["soc_start"],
+            "soc_end": soc_end,
+            "target": tgt,
+            "below_target": (soc_end is not None and tgt is not None and soc_end < tgt - self.TOLERANCE),
+        }
+        return True
+
+
+class RangeLearner:
+    """Learns the real km per 1 % of battery from the driving history.
+
+    Uses odometer and battery level only, so cold weather, tyres and battery
+    ageing are all reflected. Charging resets the measurement window.
+    """
+
+    MIN_DROP = 3.0  # % of battery needed for a sample
+    MIN_KM = 5.0
+    ALPHA = 0.3
+    LOW, HIGH = 1.0, 20.0  # plausible km per 1 %
+
+    def __init__(self, data: dict[str, Any] | None = None) -> None:
+        data = data or {}
+        self.km_per_pct: float | None = data.get("km_per_pct")
+        self.samples: int = int(data.get("samples", 0))
+        self._base: tuple[float, float] | None = None  # (odometer, soc)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"km_per_pct": self.km_per_pct, "samples": self.samples}
+
+    def update(self, odometer: float | None, soc: float | None, charging: bool | None) -> bool:
+        """Register a reading; True when the learned value changed."""
+        if odometer is None or soc is None:
+            return False
+        if charging or self._base is None or soc > self._base[1] or odometer < self._base[0]:
+            self._base = (odometer, soc)
+            return False
+        drop, km = self._base[1] - soc, odometer - self._base[0]
+        if drop < self.MIN_DROP:
+            return False
+        self._base = (odometer, soc)
+        if km < self.MIN_KM:
+            return False
+        sample = km / drop
+        if not self.LOW <= sample <= self.HIGH:
+            return False
+        self.km_per_pct = sample if self.km_per_pct is None else (
+            self.ALPHA * sample + (1 - self.ALPHA) * self.km_per_pct
+        )
+        self.samples += 1
+        return True
+
+    def estimate(self, soc: float | None, car_range: float | None) -> float | None:
+        """Range at the current charge; falls back to the car's own estimate."""
+        if soc is None:
+            return None
+        if self.km_per_pct is not None:
+            return round(self.km_per_pct * soc, 0)
+        return None if car_range is None else round(car_range, 0)
 
 
 DERIVED_SENSORS = tuple(DERIVED_NAMES)
@@ -784,4 +1008,15 @@ def derived_available(key: str, vehicle_data: dict[str, Any]) -> bool:
         return _spec_value("odometer", vehicle_data.get("odometer")) is not None
     if key.startswith("last_trip_"):
         return _spec_value("trip_automatic", vehicle_data.get("odometer")) is not None
+    if key.startswith("last_charge_") or key == "charge_below_target":
+        return is_charging(battery) is not None
+    if key == "range_learned":
+        return (
+            _spec_value("battery_level", battery) is not None
+            and _spec_value("odometer", vehicle_data.get("odometer")) is not None
+        )
     return False
+
+
+# Cost sensors need the electricity price option to be set.
+COST_KEYS = ("last_trip_cost", "last_charge_cost")
