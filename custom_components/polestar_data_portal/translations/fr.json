@@ -39,7 +39,8 @@
         "description": "Le portail autorise 10 000 appels d'API par jour. Chaque type de données activé coûte un appel par véhicule et par interrogation. Vous avez {vehicles} véhicule(s) ; l'intégration maintient l'estimation sous {limit} appels par jour.",
         "data": {
           "scan_interval": "Intervalle d'interrogation (minutes)",
-          "endpoints": "Données à récupérer"
+          "endpoints": "Données à récupérer",
+          "electricity_price": "Electricity price per kWh (0 = no cost sensors)"
         }
       }
     },
@@ -126,6 +127,9 @@
       },
       "total_energy_consumption": {
         "name": "Consommation d'énergie totale"
+      },
+      "total_energy_automatic": {
+        "name": "Total energy (automatic trip)"
       },
       "preconditioning_status": {
         "name": "Préconditionnement"
@@ -386,16 +390,46 @@
         "name": "Puissance de charge (calculée)"
       },
       "last_trip_distance": {
-        "name": "Last trip distance"
+        "name": "Distance du dernier trajet"
       },
       "last_trip_consumption": {
-        "name": "Last trip consumption"
+        "name": "Consommation du dernier trajet"
       },
       "last_trip_energy": {
-        "name": "Last trip energy used"
+        "name": "Énergie du dernier trajet"
       },
       "last_trip_end": {
-        "name": "Last trip ended"
+        "name": "Fin du dernier trajet"
+      },
+      "last_trip_energy_driving": {
+        "name": "Last trip energy: driving"
+      },
+      "last_trip_energy_climate": {
+        "name": "Last trip energy: climate"
+      },
+      "last_trip_energy_battery": {
+        "name": "Last trip energy: battery"
+      },
+      "last_trip_energy_other": {
+        "name": "Last trip energy: other"
+      },
+      "last_trip_cost": {
+        "name": "Last trip cost"
+      },
+      "last_charge_energy": {
+        "name": "Last charge energy (estimated)"
+      },
+      "last_charge_duration": {
+        "name": "Last charge duration"
+      },
+      "last_charge_end": {
+        "name": "Last charge ended"
+      },
+      "last_charge_cost": {
+        "name": "Last charge cost (estimated)"
+      },
+      "range_learned": {
+        "name": "Estimated range (learned)"
       },
       "odometer_month": {
         "name": "Distance ce mois-ci"
@@ -452,6 +486,9 @@
       },
       "global_timer_active": {
         "name": "Minuterie globale active"
+      },
+      "charge_below_target": {
+        "name": "Last charge ended below target"
       }
     },
     "device_tracker": {
