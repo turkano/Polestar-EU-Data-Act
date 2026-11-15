@@ -40,7 +40,9 @@
         "data": {
           "scan_interval": "Intervalo de sondeo (minutos)",
           "endpoints": "Datos a consultar",
-          "electricity_price": "Electricity price per kWh (0 = no cost sensors)"
+          "electricity_price": "Precio de la electricidad por kWh (0 = sin sensores de coste)",
+          "battery_capacity": "Usable battery capacity in kWh (0 = unknown; enables energy by battery %, and battery health)",
+          "min_trip_km": "Shortest drive recorded as \"last trip\" (km)"
         }
       }
     },
@@ -129,7 +131,7 @@
         "name": "Consumo total de energía"
       },
       "total_energy_automatic": {
-        "name": "Total energy (automatic trip)"
+        "name": "Energía total (viaje automático)"
       },
       "preconditioning_status": {
         "name": "Preacondicionamiento"
@@ -402,34 +404,40 @@
         "name": "Fin del último viaje"
       },
       "last_trip_energy_driving": {
-        "name": "Last trip energy: driving"
+        "name": "Energía del último viaje: conducción"
       },
       "last_trip_energy_climate": {
-        "name": "Last trip energy: climate"
+        "name": "Energía del último viaje: climatización"
       },
       "last_trip_energy_battery": {
-        "name": "Last trip energy: battery"
+        "name": "Energía del último viaje: batería"
       },
       "last_trip_energy_other": {
-        "name": "Last trip energy: other"
+        "name": "Energía del último viaje: otros"
       },
       "last_trip_cost": {
-        "name": "Last trip cost"
+        "name": "Coste del último viaje"
       },
       "last_charge_energy": {
-        "name": "Last charge energy (estimated)"
+        "name": "Energía de la última carga (estimada)"
       },
       "last_charge_duration": {
-        "name": "Last charge duration"
+        "name": "Duración de la última carga"
       },
       "last_charge_end": {
-        "name": "Last charge ended"
+        "name": "Fin de la última carga"
       },
       "last_charge_cost": {
-        "name": "Last charge cost (estimated)"
+        "name": "Coste de la última carga (estimado)"
+      },
+      "charge_capacity": {
+        "name": "Battery capacity (from AC charges)"
+      },
+      "battery_soh": {
+        "name": "Battery health (estimated)"
       },
       "range_learned": {
-        "name": "Estimated range (learned)"
+        "name": "Autonomía estimada (aprendida)"
       },
       "odometer_month": {
         "name": "Kilometraje del mes"
@@ -488,7 +496,7 @@
         "name": "Temporizador global activo"
       },
       "charge_below_target": {
-        "name": "Last charge ended below target"
+        "name": "Última carga terminada por debajo del objetivo"
       }
     },
     "device_tracker": {
