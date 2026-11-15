@@ -376,6 +376,30 @@
       "unmapped_fields": {
         "name": "Champs non mappés"
       },
+      "range_at_full": {
+        "name": "Autonomie estimée à 100 %"
+      },
+      "charge_end_time": {
+        "name": "Heure de fin de charge"
+      },
+      "charging_power_calc": {
+        "name": "Puissance de charge (calculée)"
+      },
+      "last_trip_distance": {
+        "name": "Last trip distance"
+      },
+      "last_trip_consumption": {
+        "name": "Last trip consumption"
+      },
+      "last_trip_energy": {
+        "name": "Last trip energy used"
+      },
+      "last_trip_end": {
+        "name": "Last trip ended"
+      },
+      "odometer_month": {
+        "name": "Distance ce mois-ci"
+      },
       "last_update": {
         "name": "Dernière mise à jour"
       }
@@ -433,6 +457,11 @@
     "device_tracker": {
       "location": {
         "name": "Position"
+      }
+    },
+    "image": {
+      "status": {
+        "name": "État du véhicule"
       }
     }
   }
