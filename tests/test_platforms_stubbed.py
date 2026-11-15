@@ -83,6 +83,7 @@ def _install_stubs() -> None:
     dt_util = sys.modules["homeassistant.util.dt"]
     dt_util.utcnow = lambda: _dt.datetime.now(_dt.timezone.utc)
     dt_util.now = lambda: _dt.datetime.now().astimezone()
+    dt_util.parse_datetime = lambda text: _dt.datetime.fromisoformat(text)
     dt_util.start_of_local_day = lambda d: _dt.datetime(d.year, d.month, d.day).astimezone()
     sys.modules["homeassistant.util"].dt = dt_util
 
@@ -141,13 +142,15 @@ class PlatformSmokeTests(unittest.TestCase):
     def test_all_modules_import(self):
         self.assertEqual(len(self.mods), len(MODULES))
 
-    def _fake_coordinator(self):
+    def _fake_coordinator(self, mutate=None):
         battery = {
             "vin": "YSM123456",
             "timestamp": {"seconds": "1762730000", "nanos": 0},
             "batteryChargeLevelPercentage": 64,
             "chargingPowerWatts": 0,
             "estimatedDistanceToEmptyKm": 320,
+            "chargingVoltageVolts": 230,
+            "chargingCurrentAmps": 16,
         }
         odometer = {"odometerMeters": 52_000_000}
         exterior = {
@@ -164,12 +167,14 @@ class PlatformSmokeTests(unittest.TestCase):
             endpoints=["battery", "exterior", "location", "odometer"],
             client=types.SimpleNamespace(calls_today=7),
         )
+        if mutate:
+            mutate(coord.data["YSM123456"])
         coord.unmapped = lambda: ["battery.someNewField", "health.other.field"]
         coord.async_add_listener = lambda cb: (lambda: None)
         return coord
 
-    def _setup_platform(self, module_name):
-        coord = self._fake_coordinator()
+    def _setup_platform(self, module_name, mutate=None):
+        coord = self._fake_coordinator(mutate)
         added = []
         entry = types.SimpleNamespace(
             runtime_data=coord, entry_id="entry1", async_on_unload=lambda f: None
@@ -196,10 +201,52 @@ class PlatformSmokeTests(unittest.TestCase):
             ["battery.someNewField", "health.other.field"],
         )
 
+    def test_charging_values_are_zero_when_idle(self):
+        def idle(vehicle):
+            battery = vehicle["battery"]
+            for k in ("chargingPowerWatts", "chargingVoltageVolts", "chargingCurrentAmps"):
+                battery.pop(k)
+            battery["chargingStatusV2"] = "CHARGING_STATUS_V2_IDLE"
+
+        _, added = self._setup_platform("sensor", idle)
+        by_uid = {e._attr_unique_id: e for e in added}
+        for key in ("charging_power", "charging_voltage", "charging_current", "charging_power_calc"):
+            self.assertEqual(by_uid[f"YSM123456_{key}"].native_value, 0.0, key)
+
+    def test_charging_values_stay_unknown_without_status(self):
+        def no_status(vehicle):
+            for k in ("chargingPowerWatts", "chargingVoltageVolts", "chargingCurrentAmps"):
+                vehicle["battery"].pop(k)
+
+        _, added = self._setup_platform("sensor", no_status)
+        uids = {e._attr_unique_id for e in added}
+        self.assertNotIn("YSM123456_charging_voltage", uids)
+        self.assertNotIn("YSM123456_charging_power_calc", uids)
+
+    def test_last_trip_sensors(self):
+        def with_trip(vehicle):
+            vehicle["odometer"]["tripMeterAutomaticKm"] = 12.0
+
+        coord, added = self._setup_platform("sensor", with_trip)
+        by_uid = {e._attr_unique_id: e for e in added}
+        for key in ("distance", "consumption", "energy", "end"):
+            self.assertIn(f"YSM123456_last_trip_{key}", by_uid)
+        self.assertIsNone(by_uid["YSM123456_last_trip_distance"].native_value)  # nothing recorded yet
+        coord.trip_recorders["YSM123456"].tracker.last = {
+            "distance_km": 12.0, "energy_kwh": 1.8, "consumption": 15.0,
+            "started": "2025-11-10T08:00:00+00:00", "ended": "2025-11-10T08:20:00+00:00",
+        }
+        self.assertEqual(by_uid["YSM123456_last_trip_distance"].native_value, 12.0)
+        self.assertEqual(by_uid["YSM123456_last_trip_consumption"].native_value, 15.0)
+        self.assertEqual(by_uid["YSM123456_last_trip_energy"].native_value, 1.8)
+
     def test_derived_sensors(self):
         _, added = self._setup_platform("sensor")
         by_uid = {e._attr_unique_id: e for e in added}
         self.assertEqual(by_uid["YSM123456_range_at_full"].native_value, 500)  # 320 km at 64 % -> 500 km
+        calc = by_uid["YSM123456_charging_power_calc"]
+        self.assertEqual(calc.native_value, 3.68)
+        self.assertEqual(calc.extra_state_attributes["current_a"], 16.0)
         self.assertNotIn("YSM123456_charge_end_time", by_uid)  # no time_to_full reported
         month = by_uid["YSM123456_odometer_month"]
         month._refresh()  # Home Assistant does this when the entity is added

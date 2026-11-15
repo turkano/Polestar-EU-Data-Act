@@ -10,7 +10,7 @@ import importlib
 import sys
 import types
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 COMP = Path(__file__).resolve().parents[1] / "custom_components" / "polestar_data_portal"
@@ -73,12 +73,12 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(self.spec("battery_level").extract(BATTERY), 72.0)
         self.assertEqual(self.spec("charging_power").extract(BATTERY), 7200.0)
         self.assertEqual(self.spec("range").extract(BATTERY), 310.0)
-        self.assertEqual(self.spec("preconditioning_status").extract(BATTERY), "OFF")
-        self.assertEqual(self.spec("charging_status").extract(BATTERY), "CHARGING_STATUS_CHARGING")
+        self.assertEqual(self.spec("preconditioning_status").extract(BATTERY), "Off")
+        self.assertEqual(self.spec("charging_status").extract(BATTERY), "Charging")
 
     def test_charging_status_falls_back_to_deprecated_field(self):
         data = {"chargingStatus": "OLD_VALUE"}
-        self.assertEqual(self.spec("charging_status").extract(data), "OLD_VALUE")
+        self.assertEqual(self.spec("charging_status").extract(data), "Old value")
 
     def test_missing_values_are_none(self):
         self.assertIsNone(self.spec("battery_level").extract({}))
@@ -98,7 +98,7 @@ class CatalogTests(unittest.TestCase):
     def test_nested_target_soc(self):
         data = {"targetSoc": {"batteryChargeTargetLevel": 80, "chargeTargetLevelSettingType": "DAILY"}}
         self.assertEqual(self.spec("target_soc").extract(data), 80.0)
-        self.assertEqual(self.spec("target_soc_type").extract(data), "DAILY")
+        self.assertEqual(self.spec("target_soc_type").extract(data), "Daily")
 
     def test_opening_state_variants(self):
         f = catalog.opening_state
@@ -186,7 +186,7 @@ class ExtendedCatalogTests(unittest.TestCase):
 
     def test_discharge_and_seats(self):
         self.assertEqual(self.spec("discharge_power_limit").extract({"dischargeInfo": {"powerLimit": 3700}}), 3700.0)
-        self.assertEqual(self.spec("climate_seat_front_left").extract({"requestedFrontLeftSeat": "LEVEL_2"}), "LEVEL_2")
+        self.assertEqual(self.spec("climate_seat_front_left").extract({"requestedFrontLeftSeat": "LEVEL_2"}), "Level 2")
 
     def test_unmapped_fields(self):
         payload = {
@@ -216,7 +216,7 @@ class ExtendedCatalogTests(unittest.TestCase):
             "targetSoc": {"batteryChargeTargetLevel": 80, "chargeTargetLevelSettingType": "DAILY", "id": "b", "source": "APP"},
         }
         self.assertEqual(catalog.unmapped_fields("target_soc", target), [])
-        self.assertEqual(self.spec_for("target_soc_source").extract(target), "APP")
+        self.assertEqual(self.spec_for("target_soc_source").extract(target), "App")
 
     def spec_for(self, key):
         return catalog.SPECS_BY_KEY[key]
@@ -228,6 +228,73 @@ class ExtendedCatalogTests(unittest.TestCase):
         )
 
 
+class IdleZeroTests(unittest.TestCase):
+    def test_zero_only_when_known_not_charging(self):
+        spec = catalog.SPECS_BY_KEY["charging_voltage"]
+        self.assertEqual(spec.current({"chargingStatusV2": "CHARGING_STATUS_V2_IDLE"}), 0.0)
+        self.assertIsNone(spec.current({"chargingStatusV2": "CHARGING_STATUS_V2_CHARGING"}))
+        self.assertIsNone(spec.current({"batteryChargeLevelPercentage": 50}))
+        self.assertIsNone(spec.current(None))
+        self.assertEqual(spec.current({"chargingVoltageVolts": 231}), 231.0)
+
+    def test_other_specs_unaffected(self):
+        spec = catalog.SPECS_BY_KEY["battery_level"]
+        self.assertIsNone(spec.current({"chargingStatusV2": "CHARGING_STATUS_V2_IDLE"}))
+
+    def test_calculated_power_zero_when_idle(self):
+        self.assertEqual(catalog.charging_power_kw({"chargingStatusV2": "CHARGING_STATUS_V2_IDLE"}), 0.0)
+        self.assertIsNone(catalog.charging_power_kw({}))
+
+
+class TripTrackerTests(unittest.TestCase):
+    T0 = datetime(2025, 11, 10, 8, 0, tzinfo=timezone.utc)
+
+    def run_seq(self, tracker, seq):
+        done = []
+        for minutes, km, cons in seq:
+            done.append(tracker.update(self.T0 + timedelta(minutes=minutes), km, cons))
+        return done
+
+    def test_drive_after_meter_reset(self):
+        t = catalog.TripTracker()
+        done = self.run_seq(t, [
+            (0, 37.4, 15.6), (5, 37.4, 15.6),          # parked, old trip still shown
+            (10, 0.8, 14.0), (15, 6.2, 14.5), (20, 12.0, 15.0),   # new drive, meter reset
+            (25, 12.0, 15.0), (30, 12.0, 15.0), (35, 12.0, 15.0),  # stopped 15 min
+        ])
+        self.assertEqual(done, [False] * 7 + [True])
+        self.assertEqual(t.last["distance_km"], 12.0)
+        self.assertEqual(t.last["energy_kwh"], 1.8)
+        self.assertEqual(t.last["consumption"], 15.0)
+
+    def test_drive_without_reset_uses_differences(self):
+        t = catalog.TripTracker()
+        self.run_seq(t, [(0, 12.0, 15.0), (5, 12.0, 15.0), (10, 16.0, 16.0), (15, 20.0, 16.0),
+                         (20, 20.0, 16.0), (25, 20.0, 16.0), (30, 20.0, 16.0), (35, 20.0, 16.0)])
+        self.assertEqual(t.last["distance_km"], 8.0)
+        self.assertEqual(t.last["energy_kwh"], 1.4)      # 3.2 - 1.8
+        self.assertEqual(t.last["consumption"], 17.5)
+
+    def test_tiny_movement_is_ignored(self):
+        t = catalog.TripTracker()
+        self.run_seq(t, [(0, 5.0, 15.0), (5, 5.2, 15.0), (10, 5.2, 15.0), (30, 5.2, 15.0)])
+        self.assertIsNone(t.last)
+
+    def test_missing_consumption_still_gives_distance(self):
+        t = catalog.TripTracker()
+        self.run_seq(t, [(0, 10.0, None), (5, 14.0, None), (10, 14.0, None), (30, 14.0, None)])
+        self.assertEqual(t.last["distance_km"], 4.0)
+        self.assertIsNone(t.last["consumption"])
+        self.assertIsNone(t.last["energy_kwh"])
+
+    def test_no_reading_is_ignored(self):
+        self.assertFalse(catalog.TripTracker().update(self.T0, None, None))
+
+    def test_restored_last_trip_survives(self):
+        t = catalog.TripTracker({"distance_km": 3.0})
+        self.assertEqual(t.last["distance_km"], 3.0)
+
+
 class WarningTextTests(unittest.TestCase):
     def test_humanize(self):
         self.assertEqual(catalog.humanize_warning("LOW_VOLTAGE_BATTERY_WARNING_NO_WARNING"), "No warning")
@@ -235,6 +302,36 @@ class WarningTextTests(unittest.TestCase):
         self.assertEqual(catalog.humanize_warning("NO_WARNING"), "No warning")
         self.assertEqual(catalog.humanize_warning("UNSPECIFIED"), "Unspecified")
         self.assertIsNone(catalog.humanize_warning("  "))
+
+    def test_enum_prefix_removed(self):
+        cases = [
+            ("ALARM_STATUS_IDLE", "alarm", "Idle"),
+            ("CHARGER_CONNECTION_STATUS_DISCONNECTED", "chargerConnectionStatus", "Disconnected"),
+            ("AVAILABILITY_STATUS_AVAILABLE", "availabilityStatus", "Available"),
+            ("CHARGING_STATUS_V2_IDLE", "chargingStatusV2", "Idle"),
+            ("CHARGING_STATUS_CHARGING", "chargingStatusV2", "Charging"),
+            ("CHARGER_POWER_STATUS_NO_POWER_AVAILABLE", "chargerPowerStatus", "No power available"),
+            ("USAGE_MODE_ABANDONED", "usageMode", "Abandoned"),
+            ("CHARGING_TYPE_NONE", "chargingType", "None"),
+            ("CUSTOM", "chargeTargetLevelSettingType", "Custom"),
+            ("TOTALLY_NEW_THING", "someField", "Totally new thing"),  # unknown pattern: prettified only
+        ]
+        for raw, field, want in cases:
+            self.assertEqual(catalog.humanize_enum(raw, field), want, raw)
+
+    def test_charging_still_detected_after_shortening(self):
+        self.assertTrue(catalog.is_charging({"chargingStatusV2": "CHARGING_STATUS_V2_CHARGING"}))
+        self.assertFalse(catalog.is_charging({"chargingStatusV2": "CHARGING_STATUS_V2_IDLE"}))
+
+    def test_ids_are_not_humanised(self):
+        spec = catalog.SPECS_BY_KEY["charge_location_id"]
+        self.assertEqual(spec.extract({"locationId": "ABC_123"}), "ABC_123")
+
+    def test_calculated_charging_power(self):
+        self.assertEqual(catalog.charging_power_kw({"chargingVoltageVolts": 230, "chargingCurrentAmps": 16}), 3.68)
+        self.assertEqual(catalog.charging_power_kw({"chargingVoltageVolts": 400, "chargingCurrentAmps": 0}), 0.0)
+        self.assertIsNone(catalog.charging_power_kw({"chargingVoltageVolts": 230}))
+        self.assertIsNone(catalog.charging_power_kw(None))
 
     def test_warning_specs_use_it(self):
         spec = catalog.SPECS_BY_KEY["brake_fluid_warning"]
