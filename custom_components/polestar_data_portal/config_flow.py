@@ -44,6 +44,9 @@ from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_ENDPOINTS,
+    CONF_CAPACITY,
+    CONF_MIN_TRIP,
+    DEFAULT_MIN_TRIP_KM,
     CONF_PRICE,
     CONF_SCAN_INTERVAL,
     DOMAIN,
@@ -167,6 +170,8 @@ class PolestarOptionsFlow(OptionsFlow):
                         CONF_SCAN_INTERVAL: interval,
                         CONF_ENDPOINTS: endpoints,
                         CONF_PRICE: max(float(user_input.get(CONF_PRICE) or 0), 0.0),
+                        CONF_CAPACITY: max(float(user_input.get(CONF_CAPACITY) or 0), 0.0),
+                        CONF_MIN_TRIP: max(float(user_input.get(CONF_MIN_TRIP) or 0), 0.0),
                     }
                 )
 
@@ -200,6 +205,22 @@ class PolestarOptionsFlow(OptionsFlow):
                     default=float((user_input or current).get(CONF_PRICE, 0) or 0),
                 ): NumberSelector(
                     NumberSelectorConfig(min=0, max=10, step=0.001, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(
+                    CONF_CAPACITY,
+                    default=float((user_input or current).get(CONF_CAPACITY, 0) or 0),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0, max=200, step=0.1, mode=NumberSelectorMode.BOX, unit_of_measurement="kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_TRIP,
+                    default=float((user_input or current).get(CONF_MIN_TRIP, DEFAULT_MIN_TRIP_KM)),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0, max=100, step=0.5, mode=NumberSelectorMode.BOX, unit_of_measurement="km"
+                    )
                 ),
             }
         )

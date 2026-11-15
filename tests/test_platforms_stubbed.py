@@ -244,6 +244,8 @@ class PlatformSmokeTests(unittest.TestCase):
     def test_trip_breakdown_charge_range_and_cost(self):
         def with_trip(vehicle):
             vehicle["odometer"]["tripMeterAutomaticKm"] = 12.0
+            vehicle["battery"]["energyConsumptionWhAutomatic"] = {
+                "driving": 1500, "climate": 400, "battery": 50, "other": 50}
 
         coord, added = self._setup_platform("sensor", with_trip, {"electricity_price": 0.2})
         by_uid = {e._attr_unique_id: e for e in added}
@@ -268,6 +270,28 @@ class PlatformSmokeTests(unittest.TestCase):
         self.assertEqual(by_uid["YSM123456_range_learned"].native_value, 320)
         rec.range.km_per_pct = 4.0
         self.assertEqual(by_uid["YSM123456_range_learned"].native_value, 256)
+
+    def test_capacity_and_health_sensors(self):
+        coord, added = self._setup_platform("sensor", options={"battery_capacity": 60.0})
+        by_uid = {e._attr_unique_id: e for e in added}
+        cap, soh = by_uid["YSM123456_charge_capacity"], by_uid["YSM123456_battery_soh"]
+        self.assertIsNone(soh.native_value)  # not enough sessions yet
+        rec = coord.recorders["YSM123456"]
+        rec.capacity.samples = [0.52, 0.53, 0.525]
+        self.assertEqual(cap.native_value, 52.5)
+        self.assertEqual(soh.native_value, 78.8)
+        _, added = self._setup_platform("sensor")  # no capacity configured
+        self.assertNotIn("YSM123456_battery_soh", {e._attr_unique_id for e in added})
+
+    def test_category_sensors_only_when_car_reports_them(self):
+        def with_trip(vehicle):
+            vehicle["odometer"]["tripMeterAutomaticKm"] = 12.0
+
+        _, added = self._setup_platform("sensor", with_trip)
+        uids = {e._attr_unique_id for e in added}
+        self.assertIn("YSM123456_last_trip_energy", uids)
+        for cat in ("driving", "climate", "battery", "other"):
+            self.assertNotIn(f"YSM123456_last_trip_energy_{cat}", uids)
 
     def test_cost_sensors_need_a_price(self):
         def with_trip(vehicle):

@@ -16,3 +16,6 @@ UNAVAILABLE_RETRY_SECONDS = 6 * 3600
 VEHICLE_REFRESH_SECONDS = 24 * 3600
 # Max parallel requests per poll.
 MAX_CONCURRENCY = 4
+CONF_CAPACITY = "battery_capacity"  # usable kWh, 0 = unknown
+CONF_MIN_TRIP = "min_trip_km"  # shorter drives are not recorded as "last trip"
+DEFAULT_MIN_TRIP_KM = 1.0

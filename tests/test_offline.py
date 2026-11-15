@@ -355,6 +355,78 @@ class ChargeTrackerTests(unittest.TestCase):
         self.assertIsNone(t.last)
 
 
+class TripFromBatteryPercentTests(unittest.TestCase):
+    T0 = datetime(2025, 11, 10, 8, 0, tzinfo=timezone.utc)
+
+    def drive(self, soc_end, capacity=75.0, km_end=20.0):
+        t = catalog.TripTracker()
+        seq = [(0, 10.0, 80), (5, 10.0, 80), (10, km_end, soc_end)] + [(m, km_end, soc_end) for m in (15, 20, 25, 30)]
+        for m, km, soc in seq:
+            t.update(self.T0 + timedelta(minutes=m), km, None, None, None, soc, capacity)
+        return t.last
+
+    def test_energy_from_percent(self):
+        last = self.drive(78)  # 2 % of 75 kWh over 10 km
+        self.assertEqual(last["energy_source"], "battery_percent")
+        self.assertEqual(last["energy_kwh"], 1.5)
+        self.assertEqual(last["consumption"], 15.0)
+
+    def test_no_drop_means_unknown_and_no_capacity_means_unknown(self):
+        self.assertIsNone(self.drive(80)["energy_kwh"])
+        self.assertIsNone(self.drive(78, capacity=None)["energy_kwh"])
+
+
+class MinimumTripTests(unittest.TestCase):
+    T0 = datetime(2025, 11, 10, 8, 0, tzinfo=timezone.utc)
+
+    def run_trip(self, km, min_km):
+        t = catalog.TripTracker(min_km=min_km)
+        for m, k in ((0, 10.0), (5, 10.0), (10, 10.0 + km), (30, 10.0 + km), (45, 10.0 + km)):
+            t.update(self.T0 + timedelta(minutes=m), k, None)
+        return t.last
+
+    def test_short_drive_is_skipped(self):
+        self.assertIsNone(self.run_trip(4.0, 5.0))
+
+    def test_long_enough_drive_is_recorded(self):
+        self.assertEqual(self.run_trip(6.0, 5.0)["distance_km"], 6.0)
+
+
+class CapacityLearnerTests(unittest.TestCase):
+    def session(self, **kw):
+        last = {"energy_kwh": 21.0, "soc_start": 20, "soc_end": 60, "peak_kw": 7.4, "continuous": True}
+        last.update(kw)
+        return last
+
+    def test_good_ac_session_is_used(self):
+        self.assertAlmostEqual(catalog.capacity_sample(self.session()), 0.525)
+
+    def test_unsuitable_sessions_are_rejected(self):
+        for bad in (self.session(peak_kw=120), self.session(soc_end=40), self.session(continuous=False),
+                    self.session(energy_kwh=2.0)):
+            self.assertIsNone(catalog.capacity_sample(bad))
+
+    def test_median_soh_and_persistence(self):
+        c = catalog.CapacityLearner()
+        for kwh in (21.0, 20.8, 21.2):
+            c.add(self.session(energy_kwh=kwh))
+        self.assertIsNone(catalog.CapacityLearner().capacity_kwh())
+        self.assertEqual(c.capacity_kwh(), 52.5)
+        self.assertEqual(c.soh(60.0), 78.8)   # 52.5 x 0.9 / 60
+        self.assertIsNone(c.soh(0))
+        self.assertEqual(catalog.CapacityLearner(c.to_dict()).capacity_kwh(), 52.5)
+
+    def test_charge_tracker_flags_dc_and_gaps(self):
+        t = catalog.ChargeTracker()
+        T0 = datetime(2025, 11, 10, 20, 0, tzinfo=timezone.utc)
+        for m, kw, soc in ((0, 100.0, 20), (10, 120.0, 40), (20, 90.0, 60)):
+            t.update(T0 + timedelta(minutes=m), True, kw, soc, 80)
+        t.update(T0 + timedelta(minutes=25), False, 0, 60, 80)
+        self.assertEqual(t.last["peak_kw"], 120.0)
+        self.assertTrue(t.last["continuous"])
+        self.assertIsNone(catalog.capacity_sample(t.last))
+
+
 class RangeLearnerTests(unittest.TestCase):
     def test_learns_km_per_percent(self):
         r = catalog.RangeLearner()

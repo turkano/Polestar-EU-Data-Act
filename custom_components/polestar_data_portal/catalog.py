@@ -634,6 +634,18 @@ DERIVED_NAMES = {
         "Coût de la dernière charge (estimé)",
         "Kosten der letzten Ladung (geschätzt)",
     ),
+    "charge_capacity": (
+        "Battery capacity (from AC charges)",
+        "Capacidad de la batería (según cargas AC)",
+        "Capacité de la batterie (charges AC)",
+        "Batteriekapazität (aus AC-Ladungen)",
+    ),
+    "battery_soh": (
+        "Battery health (estimated)",
+        "Salud de la batería (estimada)",
+        "État de santé de la batterie (estimé)",
+        "Batteriezustand (geschätzt)",
+    ),
     "range_learned": (
         "Estimated range (learned)",
         "Autonomía estimada (aprendida)",
@@ -779,10 +791,12 @@ class TripTracker:
     IDLE = timedelta(minutes=15)
     MIN_KM = 0.5
 
-    def __init__(self, last: dict[str, Any] | None = None) -> None:
+    def __init__(self, last: dict[str, Any] | None = None, min_km: float | None = None) -> None:
         self.last: dict[str, Any] | None = last
+        self.min_km = self.MIN_KM if min_km is None else min_km
         self._prev: dict[str, Any] | None = None
         self._active: dict[str, Any] | None = None
+        self._capacity: float | None = None
 
     @staticmethod
     def _cons_energy(km: float, consumption: float | None) -> float | None:
@@ -807,11 +821,18 @@ class TripTracker:
         consumption: float | None,
         energy_wh: float | None = None,
         breakdown: dict[str, float] | None = None,
+        soc: float | None = None,
+        capacity_kwh: float | None = None,
     ) -> bool:
-        """Register a reading; True when a drive has just been completed."""
+        """Register a reading; True when a drive has just been completed.
+
+        ``soc`` and ``capacity_kwh`` give a last-resort energy estimate (battery
+        percentage spent x usable capacity) when the car reports no energy data.
+        """
         if trip_km is None:
             return False
-        sample = {"t": now, "km": trip_km, "cons": consumption, "wh": energy_wh, "bd": breakdown}
+        self._capacity = capacity_kwh
+        sample = {"t": now, "km": trip_km, "cons": consumption, "wh": energy_wh, "bd": breakdown, "soc": soc}
         prev, self._prev = self._prev, sample
         if prev is None:
             return False
@@ -821,7 +842,11 @@ class TripTracker:
         moved = reset or trip_km > prev["km"] + 0.05
         if moved:
             if self._active is None:
-                self._active = {"started": prev["t"], "base": self._base(None if reset else prev)}
+                self._active = {
+                    "started": prev["t"],
+                    "base": self._base(None if reset else prev),
+                    "soc_start": prev["soc"],
+                }
             elif reset:  # the car reset the counters during the drive
                 self._active["base"] = self._base(None)
             self._active["last_move"] = now
@@ -836,7 +861,7 @@ class TripTracker:
         assert active is not None
         end, base = active["end"], active["base"]
         distance = end["km"] - base["km"]
-        if distance < self.MIN_KM:
+        if distance < self.min_km:
             return False
         energy: float | None = None
         breakdown: dict[str, float] | None = None
@@ -854,6 +879,10 @@ class TripTracker:
             end_energy = self._cons_energy(end["km"], end["cons"])
             if end_energy is not None and base["cons"] is not None and end_energy - base["cons"] > 0:
                 energy, source = end_energy - base["cons"], "estimated"
+        if energy is None and self._capacity and active.get("soc_start") is not None and end["soc"] is not None:
+            drop = active["soc_start"] - end["soc"]
+            if drop > 0:  # 0 % is below the 1 % resolution, so unknown rather than 0
+                energy, source = drop / 100.0 * self._capacity, "battery_percent"
         per_100 = None
         if energy is not None:
             per_100 = energy / distance * 100.0
@@ -904,13 +933,20 @@ class ChargeTracker:
             return False
         if charging:
             if self._active is None:
-                self._active = {"started": now, "soc_start": soc, "energy": 0.0, "soc": soc, "target": target}
-            elif self._prev and now - self._prev[0] <= self.MAX_GAP:
+                self._active = {
+                    "started": now, "soc_start": soc, "energy": 0.0, "soc": soc, "target": target,
+                    "peak": 0.0, "gap": False,
+                }
+            elif self._prev and now - self._prev[0] > self.MAX_GAP:
+                self._active["gap"] = True
+            elif self._prev:
                 p0 = self._prev[1] if self._prev[1] is not None else power_kw
                 p1 = power_kw if power_kw is not None else p0
                 if p0 is not None and p1 is not None:
                     hours = (now - self._prev[0]).total_seconds() / 3600.0
                     self._active["energy"] += (max(p0, 0) + max(p1, 0)) / 2.0 * hours
+            if power_kw is not None:
+                self._active["peak"] = max(self._active["peak"], power_kw)
             if soc is not None:
                 self._active["soc"] = soc
             if target is not None:
@@ -935,9 +971,67 @@ class ChargeTracker:
             "soc_start": active["soc_start"],
             "soc_end": soc_end,
             "target": tgt,
+            "peak_kw": round(active["peak"], 1),
+            "continuous": not active["gap"],
             "below_target": (soc_end is not None and tgt is not None and soc_end < tgt - self.TOLERANCE),
         }
         return True
+
+
+AC_PEAK_KW = 25.0  # above this a session is treated as DC fast charging
+AC_EFFICIENCY = 0.90  # assumed AC wall-to-battery efficiency for the absolute SOH
+
+
+def capacity_sample(last: dict[str, Any] | None) -> float | None:
+    """kWh per 1 % of battery from one session, or None if unsuitable.
+
+    Only long, uninterrupted AC sessions count: short ones are dominated by the
+    1 % resolution and DC sessions have different losses.
+    """
+    if not last or not last.get("continuous") or (last.get("peak_kw") or 0) > AC_PEAK_KW:
+        return None
+    start, end, energy = last.get("soc_start"), last.get("soc_end"), last.get("energy_kwh")
+    if start is None or end is None or not energy or end - start < CapacityLearner.MIN_DELTA:
+        return None
+    sample = energy / (end - start)
+    return sample if CapacityLearner.LOW <= sample <= CapacityLearner.HIGH else None
+
+
+class CapacityLearner:
+    """Battery capacity trend from the energy needed per 1 % in AC charges."""
+
+    MIN_DELTA = 30.0  # percentage points
+    LOW, HIGH = 0.3, 1.5  # plausible kWh per 1 %
+    KEEP, USE, MIN_SAMPLES = 20, 10, 3
+
+    def __init__(self, data: dict[str, Any] | None = None) -> None:
+        raw = (data or {}).get("samples", [])
+        self.samples: list[float] = [float(x) for x in raw if isinstance(x, (int, float))][-self.KEEP:]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"samples": self.samples}
+
+    def add(self, last: dict[str, Any] | None) -> bool:
+        sample = capacity_sample(last)
+        if sample is None:
+            return False
+        self.samples = (self.samples + [round(sample, 4)])[-self.KEEP:]
+        return True
+
+    def capacity_kwh(self) -> float | None:
+        """Median energy for 100 % in the recent AC sessions (as seen at the charger)."""
+        if len(self.samples) < self.MIN_SAMPLES:
+            return None
+        recent = sorted(self.samples[-self.USE:])
+        mid = len(recent) // 2
+        median = recent[mid] if len(recent) % 2 else (recent[mid - 1] + recent[mid]) / 2
+        return round(median * 100.0, 1)
+
+    def soh(self, nominal_kwh: float | None) -> float | None:
+        wall = self.capacity_kwh()
+        if wall is None or not nominal_kwh or nominal_kwh <= 0:
+            return None
+        return round(min(wall * AC_EFFICIENCY / nominal_kwh * 100.0, 100.0), 1)
 
 
 class RangeLearner:
@@ -1006,10 +1100,19 @@ def derived_available(key: str, vehicle_data: dict[str, Any]) -> bool:
         return charging_power_kw(battery) is not None
     if key == "odometer_month":
         return _spec_value("odometer", vehicle_data.get("odometer")) is not None
+    if key.startswith("last_trip_energy_"):
+        # Category split only exists when the car reports it.
+        cat = key.removeprefix("last_trip_energy_")
+        return (
+            _spec_value("trip_automatic", vehicle_data.get("odometer")) is not None
+            and _spec_value(f"energy_automatic_{cat}", battery) is not None
+        )
     if key.startswith("last_trip_"):
         return _spec_value("trip_automatic", vehicle_data.get("odometer")) is not None
     if key.startswith("last_charge_") or key == "charge_below_target":
         return is_charging(battery) is not None
+    if key in ("charge_capacity", "battery_soh"):
+        return is_charging(battery) is not None and _spec_value("battery_level", battery) is not None
     if key == "range_learned":
         return (
             _spec_value("battery_level", battery) is not None
