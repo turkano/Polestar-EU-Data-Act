@@ -40,7 +40,9 @@
         "data": {
           "scan_interval": "Polling interval (minutes)",
           "endpoints": "Data to fetch",
-          "electricity_price": "Electricity price per kWh (0 = no cost sensors)"
+          "electricity_price": "Electricity price per kWh (0 = no cost sensors)",
+          "battery_capacity": "Usable battery capacity in kWh (0 = unknown; enables energy by battery %, and battery health)",
+          "min_trip_km": "Shortest drive recorded as \"last trip\" (km)"
         }
       }
     },
@@ -427,6 +429,12 @@
       },
       "last_charge_cost": {
         "name": "Last charge cost (estimated)"
+      },
+      "charge_capacity": {
+        "name": "Battery capacity (from AC charges)"
+      },
+      "battery_soh": {
+        "name": "Battery health (estimated)"
       },
       "range_learned": {
         "name": "Estimated range (learned)"
